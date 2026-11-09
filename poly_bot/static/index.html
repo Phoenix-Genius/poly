@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poly Martingale</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23FACC15'/%3E%3Ctext x='32' y='49' text-anchor='middle' font-family='Arial,Helvetica,sans-serif' font-size='46' font-weight='900' fill='%2386EFAC'%3EP%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
+    --accent: #2563eb; --green: #15803d; --red: #c62828; --amber: #b45309;
+    --green-bg: #e8f5ec; --red-bg: #fdecec; --amber-bg: #fdf3e2; --input: #ffffff;
+    --side-bg: #e9edf3; --active-bg: #eef4ff; --page-bg: #ffffff; --section-bg: #f2f4f7;
+    --up: #15803d; --down: #c62828;
+    color-scheme: light;
+  }
+  :root.dark {
+    --bg: #0f1115; --panel: #181b21; --text: #e7e9ee; --muted: #9098a5; --line: #2a2e36;
+    --accent: #5b8def; --green: #4ade80; --red: #f87171; --amber: #fbbf24;
+    --green-bg: #173024; --red-bg: #3a1d1d; --amber-bg: #3a2e14; --input: #111318;
+    --side-bg: #0a0c10; --active-bg: #1a2335; --page-bg: #0b0d11; --section-bg: #1b1f26;
+    --up: #4ade80; --down: #f87171;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; border-radius: 0; }
+  [hidden] { display: none !important; }   /* .btn's display would otherwise show hidden buttons */
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--page-bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+
+  /* layout: bot list | settings | page, each scrolls by itself */
+  .app { display: grid; grid-template-columns: 220px 300px 1fr; height: 100vh; }
+  .col { overflow-y: auto; min-width: 0; }
+  #botsCol { background: var(--side-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #setCol { background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #mainCol { padding: 14px 18px 40px; }
+  @media (max-width: 900px) {
+    .app { display: block; height: auto; }
+    .col { overflow: visible; }
+    #mainCol { padding: 12px 16px 40px; }
+  }
+
+  /* bot list */
+  .brand { padding: 12px 14px 8px; font-weight: 700; }
+  .brand small { font-weight: 400; color: var(--muted); }
+  #bots { flex: 1; }
+  .bot-item { display: flex; gap: 8px; align-items: center; padding: 8px 14px; cursor: pointer; border-left: 3px solid transparent; }
+  .bot-item:hover { background: var(--active-bg); }
+  .bot-item.active { background: var(--active-bg); border-left-color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; flex: none; }
+  .dot.run { background: var(--green); } .dot.halt { background: var(--red); } .dot.lock { background: var(--amber); }
+  .bot-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bot-item .sub { font-size: 12px; color: var(--muted); }
+  .side-foot { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+
+  /* buttons */
+  .btn { border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.go { background: var(--green); border-color: var(--green); color: #fff; }
+  .btn.stop { background: var(--red); border-color: var(--red); color: #fff; }
+  .dark .btn.go, .dark .btn.stop, .dark .btn.primary { color: #0b0d11; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* settings */
+  #setCol h3 { margin: 0; padding: 12px 14px 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  #form { padding: 4px 14px 14px; flex: 1; }
+  .field { margin: 10px 0; }
+  .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+  .field input, .field select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); background: var(--input); }
+  .field .help { font-size: 12px; color: var(--muted); margin-top: 3px; display: none; }
+  .field:focus-within .help { display: block; }   /* compact: a field's help shows while you edit it */
+  .field label { cursor: help; }
+  .field.hide { display: none; }
+  .savebar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; align-items: center; }
+  .savebar .msg { font-size: 12px; }
+
+  /* page */
+  .head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .head h1 { margin: 0; font-size: 20px; }
+  .badge { font-size: 12px; padding: 2px 7px; border: 1px solid var(--line); background: var(--section-bg); }
+  .badge.paper { color: #6d28d9; border-color: #c4b5fd; }
+  .badge.live { color: #fff; background: var(--red); border-color: var(--red); font-weight: 700; }
+  .dark .badge.live { color: #0b0d11; }
+  #keysPanel { --sec: #0d9488; } .dark #keysPanel { --sec: #2dd4bf; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 12px; }
+  .keys .field { margin: 6px 0; }
+  .keys .field input { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .check { margin-top: 8px; font-size: 13px; }
+  .steps-help { margin: 0 0 8px; padding-left: 18px; font-size: 13px; }
+  .steps-help li { margin: 2px 0; }
+  .status { flex-basis: 100%; color: var(--muted); }
+  .status.halt { color: var(--red); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .tile { background: var(--section-bg); padding: 8px 10px; border-left: 3px solid var(--tone, var(--line)); }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 18px; font-weight: 700; }
+  .steps { display: flex; gap: 2px; margin-top: 4px; }
+  .steps i { flex: 1; height: 6px; background: var(--line); }
+  .steps i.on { background: var(--amber); } .steps i.now { background: var(--red); }
+
+  .panel { background: var(--section-bg); border-left: 3px solid var(--sec, var(--line)); margin-bottom: 12px; }
+  .panel > h2 { margin: 0; font-size: 14px; padding: 9px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; user-select: none; }
+  .panel > h2::before { content: "▾"; color: var(--muted); }
+  .panel.folded > h2::before { content: "▸"; }
+  .panel > h2 .sum { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .panel.folded > .body { display: none; }
+  .panel > .body { padding: 0 12px 12px; }
+  #betPanel { --sec: #2563eb; } #ladderPanel { --sec: #7c3aed; } #historyPanel { --sec: #4f46e5; } #logPanel { --sec: #94a3b8; }
+  .dark #betPanel { --sec: #5b8def; } .dark #ladderPanel { --sec: #a78bfa; } .dark #historyPanel { --sec: #818cf8; }
+
+  .bet { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .bet .k { font-size: 12px; color: var(--muted); }
+  .bet .v { font-weight: 700; }
+  .side-up { color: var(--up); } .side-down { color: var(--down); }
+  .chance { height: 8px; background: var(--down); margin-top: 8px; position: relative; }
+  .chance b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--up); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child, td.l, th.l { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  tr.cur td { background: var(--active-bg); font-weight: 700; }
+  tr.over td { color: var(--muted); text-decoration: line-through; }
+  tr.played td { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  .ladder-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 13px; }
+  .ladder-tools input { width: 70px; padding: 3px 6px; border: 1px solid var(--line); background: var(--input); }
+  #ladderPanel.preview { --sec: var(--accent); }
+  pre#log { margin: 0; max-height: 320px; overflow: auto; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
+
+  dialog { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 16px; width: min(360px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: var(--red-bg); color: var(--red); border: 1px solid var(--red); padding: 8px 12px; max-width: 420px; display: none; }
+  .empty { padding: 40px 0; text-align: center; color: var(--muted); }
+  #signin { position: fixed; inset: 0; background: var(--page-bg); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  #signin.on { display: flex; }
+  #signin .box { width: min(380px, 100%); background: var(--section-bg); border-left: 3px solid var(--accent); padding: 20px; }
+  #signin h2 { margin: 0 0 4px; font-size: 20px; }
+  #signin input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); background: var(--input); font-size: 16px; }
+  #signin .code { letter-spacing: 6px; font-variant-numeric: tabular-nums; }
+  .who { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .credit { font-size: 11px; color: var(--muted); }
+  .warn { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); padding: 8px 10px; margin: 8px 0; font-size: 13px; }
+  #usersDlg { width: min(760px, 96vw); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="col" id="botsCol">
+    <div class="brand">🎲 Poly Martingale <small>v{{version}}</small></div>
+    <div id="bots"></div>
+    <div class="side-foot">
+      <button class="btn primary" id="newBot">＋ New bot</button>
+      <button class="btn" id="theme" title="Light / dark">◐ Theme</button>
+      <div id="whoBox" hidden><div class="who" id="who" data-no-i18n></div>
+        <div class="actions" style="margin-top:6px"><button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>⎋ Sign out</button></div>
+        <div class="credit" style="margin-top:6px"><a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></div></div>
+    </div>
+  </aside>
+
+  <aside class="col" id="setCol">
+    <h3>Settings</h3>
+    <div id="form"></div>
+    <div class="savebar"><button class="btn primary" id="save">💾 Save settings</button><span class="msg muted" id="saveMsg"></span></div>
+  </aside>
+
+  <main class="col" id="mainCol">
+    <div id="page"><div class="empty">Make your first bot with <b>＋ New bot</b>.</div></div>
+  </main>
+</div>
+
+<dialog id="newDlg">
+  <form method="dialog" id="newForm">
+    <h3 style="margin-top:0">New bot</h3>
+    <div class="field"><label>Coin</label><select name="coin"></select></div>
+    <div class="field"><label>Round length</label><select name="timeframe"></select></div>
+    <div class="field"><label>Name (optional)</label><input name="name" maxlength="40" placeholder="e.g. BTC fast"></div>
+    <div class="actions"><button class="btn primary" value="ok">Create</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+<div id="signin"><div class="box">
+  <h2>🎲 Poly Martingale</h2>
+  <p class="muted" style="margin:0 0 14px">Optional: sign in with your email to reach your bots from any browser. Your bots made in this browser stay yours.</p>
+  <div id="stepEmail"><div class="field"><label>Email</label><input id="siEmail" type="email" autocomplete="email" placeholder="you@example.com"></div>
+    <button class="btn primary" id="siSend">✉️ Send me a sign-in code</button></div>
+  <div id="stepCode" hidden><p style="margin:0 0 8px">We sent a 6-digit code to <b id="siTo" data-no-i18n></b>.</p>
+    <div class="field"><label>Code</label><input id="siCode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></div>
+    <div class="actions"><button class="btn primary" id="siVerify">Sign in</button><button class="btn" id="siBack">← Other email</button></div></div>
+  <div class="actions" style="margin-top:12px"><button class="btn" id="siClose">Continue without email</button></div>
+  <p class="neg" id="siErr" style="margin:10px 0 0;font-size:13px"></p>
+  <p class="credit" style="margin:14px 0 0">Not available for live trading where Polymarket doesn't allow it (e.g. US, UK, France, Germany, Australia). Martingale can lose your whole budget. <a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></p>
+</div></div>
+<dialog id="usersDlg"><h3 style="margin-top:0">Users</h3><div class="scroll" id="usersTable"></div>
+  <form method="dialog" style="margin-top:10px"><button class="btn">Close</button></form></dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const money = (v, sign = false) => v == null || v === "" ? "–" : (sign && +v > 0 ? "+" : (+v < 0 ? "−" : "")) + "$" + Math.abs(+v).toFixed(2);
+const tone = v => +v > 0 ? "pos" : (+v < 0 ? "neg" : "");
+const sideHtml = s => s ? `<span class="side-${s}">${s === "up" ? "📈 Up" : "📉 Down"}</span>` : "–";
+const secs = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : Math.floor(s / 3600) + "h " + String(Math.floor(s % 3600 / 60)).padStart(2, "0") + "m"; };
+
+const fromLink = (location.hash.match(/^#bot=([\w-]+)/) || [])[1];   // http://127.0.0.1:8090/#bot=btc-5m opens that bot
+const HOSTED = document.documentElement.dataset.hosted === "1";
+let me = null;
+let schema = null, bots = [], current = fromLink || localStorage.getItem("bot") || "", status = null, formDirty = false, timer = null, ticks = 0, previewTimer = null;
+const folded = new Set(JSON.parse(localStorage.getItem("folded") || "[]"));
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Requested-With": "bot-ui"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({error: "bad answer"}));
+  if (r.status === 401 && HOSTED && !path.startsWith("/api/auth/")) {
+    // the session cookie is gone: reload once to get a guest account; if cookies are blocked, say so instead
+    let last = 0; try { last = +sessionStorage.getItem("reloaded") || 0; } catch (e) {}
+    if (Date.now() - last > 30000) { try { sessionStorage.setItem("reloaded", Date.now()); } catch (e) {} location.reload(); }
+    throw new Error("This site needs cookies to keep your bots. Allow cookies for poly.zodypay.com and reload.");
+  }
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 6000);
+}
+async function act(path, body, confirmText) {
+  if (confirmText && !confirm(confirmText)) return;
+  try { const s = await api(path, body ?? {}); if (s && s.settings) { status = s; render(); } return s; }
+  catch (e) { toast(e.message); }
+}
+
+// --- theme ---
+function applyTheme(t) { document.documentElement.classList.toggle("dark", t === "dark"); }
+applyTheme(localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+$("#theme").onclick = () => { const t = document.documentElement.classList.contains("dark") ? "light" : "dark"; localStorage.setItem("theme", t); applyTheme(t); };
+
+// --- bot list ---
+async function loadBots() {
+  const d = await api("/api/bots");
+  bots = d.bots;
+  if (schema && d.started && d.started !== schema.started && !formDirty) {
+    // the app was restarted (maybe updated): fetch the settings list again so new settings and options show up
+    schema = await api("/api/schema");
+    buildForm();
+    if (status) fillForm(status.settings);
+  }
+  if (!bots.find(b => b.id === current)) current = bots[0]?.id || "";
+  renderBots();
+}
+function renderBots() {
+  $("#bots").innerHTML = bots.map(b => {
+    const dot = b.locked ? "lock" : b.running ? "run" : b.halted ? "halt" : "";
+    return `<div class="bot-item ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}">
+      <span class="dot ${dot}"></span>
+      <span class="name" data-no-i18n>${esc(b.name)}<div class="sub">${esc(b.coin)} · ${esc(b.timeframe)} · step ${b.step}</div></span>
+      <span class="num ${tone(b.pnl)}">${money(b.pnl, true)}</span></div>`;
+  }).join("");
+  for (const el of document.querySelectorAll(".bot-item")) el.onclick = () => select(el.dataset.id);
+}
+function select(id) {
+  if (formDirty && id !== current && !confirm("Discard unsaved settings?")) return;
+  current = id; localStorage.setItem("bot", id); formDirty = false; status = null;
+  renderBots(); buildForm(); refresh();
+}
+
+// --- new bot ---
+$("#newBot").onclick = () => {
+  const f = $("#newForm");
+  f.coin.innerHTML = schema.coins.map(c => `<option>${c}</option>`).join("");
+  f.timeframe.innerHTML = schema.timeframes.map(t => `<option>${t}</option>`).join("");
+  f.name.value = "";
+  $("#newDlg").showModal();
+};
+$("#newDlg").addEventListener("close", async () => {
+  if ($("#newDlg").returnValue !== "ok") return;
+  const f = $("#newForm");
+  try {
+    const d = await api("/api/bots", {coin: f.coin.value, timeframe: f.timeframe.value, name: f.name.value});
+    bots = d.bots; formDirty = false; select(d.id);
+  } catch (e) { toast(e.message); }
+});
+
+// --- settings form, built from the schema ---
+const SIZING_ONLY = {base_profit_usd: "recover", start_usd: "multiply", multiplier: "multiply"};
+const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec"];   // shown empty when 0
+const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
+function buildForm() {
+  const form = $("#form");
+  if (!current || !schema) { form.innerHTML = '<p class="muted">No bot yet.</p>'; return; }
+  form.innerHTML = schema.fields.map(f => {
+    let input;
+    if (f.type === "select") input = `<select name="${f.key}">${f.options.map(o => `<option value="${o}">${o}</option>`).join("")}</select>`;
+    else if (f.type === "bool") input = `<input type="checkbox" name="${f.key}" style="width:auto">`;
+    else input = `<input name="${f.key}" ${f.type === "text" ? "" : 'inputmode="decimal"'} autocomplete="off">`;
+    return `<div class="field" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
+  }).join("");
+  for (const el of form.querySelectorAll("input,select")) {
+    el.addEventListener("input", () => { formDirty = true; $("#saveMsg").textContent = "unsaved"; showFields(); schedulePreview(); });
+  }
+  formDirty = false;
+}
+function fillForm(settings) {
+  for (const [k, v] of Object.entries(settings)) {
+    const el = $(`#form [name="${k}"]`);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!v; else el.value = v === 0 && ZERO_IS_OFF.includes(k) ? "" : v;
+  }
+  showFields();
+}
+function formValues() {
+  const out = {};
+  for (const el of document.querySelectorAll("#form input, #form select")) out[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  return out;
+}
+function showFields() {
+  const v = formValues();
+  for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing);
+  $('.field[data-key="first_side"]')?.classList.toggle("hide", !SIDE_FIRST.includes(v.side_mode));
+  $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
+}
+$("#save").onclick = async () => {
+  try {
+    status = await api(`/api/bots/${current}/settings`, formValues());
+    formDirty = false; $("#saveMsg").textContent = "saved ✓"; fillForm(status.settings); render(); loadBots();
+  } catch (e) { $("#saveMsg").textContent = ""; toast(e.message); }
+};
+
+// --- ladder preview of unsaved settings ---
+let preview = null;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const price = $("#planPrice")?.value || 0.5;
+    try { preview = await api(`/api/bots/${current}/plan`, {...(formDirty ? formValues() : {}), price, from_now: !formDirty}); }
+    catch (e) { preview = {error: e.message}; }
+    renderLadder();
+  }, 300);
+}
+
+// --- the page ---
+function panel(id, title, sum, body) {
+  return `<section class="panel ${folded.has(id) ? "folded" : ""}" id="${id}"><h2 data-fold="${id}">${title} <span class="sum">${sum}</span></h2><div class="body">${body}</div></section>`;
+}
+function render() {
+  const s = status, page = $("#page");
+  if (!s) { page.innerHTML = current ? '<div class="empty">Loading…</div>' : '<div class="empty">Make your first bot with <b>＋ New bot</b>.</div>'; return; }
+  const running = s.running, maxSteps = Math.max(s.ladder.fits || 1, s.step);
+  const stepBar = Array.from({length: Math.min(maxSteps, 20)}, (_, i) => `<i class="${i + 1 < s.step ? "on" : i + 1 === s.step ? "now" : ""}"></i>`).join("");
+  const keepScroll = $("#log")?.scrollTop, logAtEnd = !$("#log") || $("#log").scrollHeight - $("#log").scrollTop - $("#log").clientHeight < 30;
+  page.innerHTML = `
+    <div class="head">
+      <h1 data-no-i18n>${esc(s.name)}</h1>
+      <span class="badge">${esc(s.coin)} · ${esc(s.timeframe)}</span>
+      ${s.network === "live" ? '<span class="badge live">💵 LIVE · real money</span>' : '<span class="badge paper">📝 PAPER</span>'}
+      <span style="flex:1"></span>
+      <div class="actions">
+        ${running ? `<button class="btn stop" data-act="stop">■ Stop</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
+        <button class="btn" data-act="reset" ${running ? "disabled" : ""} title="Fresh ladder at step 1, profit back to 0">↺ Reset</button>
+        ${s.network === "live" ? "" : `<button class="btn" data-act="paper_reset" ${running ? "disabled" : ""} title="Fresh paper account with the Paper balance">🧾 Reset paper</button>`}
+        <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>
+      </div>
+      <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}</div>
+    </div>
+    <div class="tiles">
+      <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
+      <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
+      <div class="tile" style="--tone:#db2777"><div class="k">🎯 Since Start${s.settings.stop_profit_usd > 0 ? " / " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num ${tone(s.earned_since_start)}">${money(s.earned_since_start, true)}</div></div>
+      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${s.ladder.fits}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}</div><div class="steps">${stepBar}</div></div>
+      <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
+      <div class="tile"><div class="k">🧮 Budget left</div><div class="v num">${money(s.budget_left)}</div></div>
+    </div>
+    ${s.network === "live" ? keysPanel(s) : ""}
+    ${betPanel(s)}
+    <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Martingale ladder <span class="sum" id="ladderSum"></span></h2>
+      <div class="body"><div class="ladder-tools">At price <input id="planPrice" value="${esc($("#planPrice")?.value || "0.50")}" inputmode="decimal"> per share <span class="muted" id="ladderNote"></span></div><div class="scroll" id="ladderTable"></div></div></section>
+    ${panel("historyPanel", "History", `${s.trade_count} bets`, historyTable(s.trades))}
+    ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
+  `;
+  for (const b of page.querySelectorAll("[data-act]")) b.onclick = () => doAct(b.dataset.act);
+  for (const h of page.querySelectorAll("[data-fold]")) h.onclick = () => {
+    const id = h.dataset.fold; folded.has(id) ? folded.delete(id) : folded.add(id);
+    localStorage.setItem("folded", JSON.stringify([...folded])); h.parentElement.classList.toggle("folded");
+  };
+  $("#planPrice").addEventListener("input", schedulePreview);
+  $("#saveKeys")?.addEventListener("click", saveKeys);
+  $("#checkKeys")?.addEventListener("click", () => doAct("check"));
+  const log = $("#log"); if (log) log.scrollTop = logAtEnd ? log.scrollHeight : keepScroll;
+  renderLadder();
+}
+function keysPanel(s) {
+  const k = s.keys, c = s.live_check || {};
+  const ok = k.complete ? (c.wallet ? `<span class="pos">✅ Connected</span> · ${esc(c.wallet_type)} wallet <span data-no-i18n>${esc(c.wallet)}</span> · from ${esc(c.country)} · pUSD ${money(c.balance)}${c.approved === false ? ' · <span class="neg">a betting approval is missing (Polymarket sets it up with the first bet)</span>' : c.approved == null ? ' · <span class="muted">approvals: blockchain server busy, not checked</span>' : ""}` : '<span class="muted">Keys saved. Press Check connection.</span>') : '<span class="neg">Keys missing: the bot can\'t trade live until all four are saved.</span>';
+  return panel("keysPanel", "Polymarket keys", k.complete ? (c.wallet ? "✅ connected" : "saved") : "⚠️ missing", `
+    <ol class="steps-help">
+      <li>Log in at <a href="https://polymarket.com" target="_blank" rel="noopener">polymarket.com</a>. <b>Wallet address</b>: profile menu → copy the address.</li>
+      <li><b>Private key</b>: the key that owns that wallet. Email/Google login: Settings → Export Private Key. MetaMask/Rabby login: that wallet account's private key.</li>
+      <li><b>Relayer API key</b>: Settings → API Keys → Relayer API Keys → create; copy the <b>API Key</b> and its <b>Signer Address</b>. The bot uses it to claim winnings without gas.</li>
+      <li>Deposit pUSD/USDC on Polymarket, set a <b>Budget</b> in Settings, then <b>Check connection</b>.</li>
+    </ol>
+    <div class="keys">
+      <div class="field"><label>Wallet address</label><input id="k_wallet" placeholder="0x…" value="${esc(k.wallet)}" autocomplete="off" data-no-i18n></div>
+      <div class="field"><label>Private key</label><input id="k_private_key" type="password" placeholder="${k.private_key ? "saved ✓ (type to replace)" : "0x…"}" autocomplete="new-password"></div>
+      <div class="field"><label>Relayer API key</label><input id="k_relayer_key" type="password" placeholder="${k.relayer_key ? "saved ✓ " + esc(k.relayer_key) : "API key"}" autocomplete="new-password"></div>
+      <div class="field"><label>Relayer key Signer Address</label><input id="k_relayer_address" placeholder="0x…" value="${esc(k.relayer_address)}" autocomplete="off" data-no-i18n></div>
+    </div>
+    <div class="actions"><button class="btn primary" id="saveKeys" ${s.running ? "disabled" : ""}>🔑 Save keys</button><button class="btn" id="checkKeys" ${k.complete ? "" : "disabled"}>🔌 Check connection</button></div>
+    <div class="check">${ok}</div>
+    ${HOSTED && me && !me.live_allowed ? `<div class="warn">${esc(me.live_reason)}</div>` : ""}
+    ${HOSTED && me && me.guest ? `<div class="warn">Your bots belong to this browser only. A live bot keeps trading even if you clear your cookies or lose this browser, and then you couldn't stop it. Click <b>✉️ Keep my bots with email</b> (bottom left) first.</div>` : ""}
+    <p class="muted" style="font-size:12px;margin:8px 0 0">${HOSTED
+      ? "Your keys are stored encrypted on this server and never shown again. A private key can move all the money in that Polymarket account: use a separate account holding only what the bot may lose."
+      : "Keys stay on this computer in the bot's folder (.env), never shown on this page again. Anyone with the private key can move your funds: keep the computer safe."}</p>`);
+}
+async function saveKeys() {
+  const body = {};
+  for (const f of ["wallet", "private_key", "relayer_key", "relayer_address"]) body[f] = $("#k_" + f).value.trim();
+  document.activeElement?.blur();
+  const s = await act(`/api/bots/${current}/keys`, body);
+  if (s) toastOk("Keys saved");
+}
+function toastOk(msg) { const t = $("#toast"); t.style.background = "var(--green-bg)"; t.style.color = "var(--green)"; t.style.borderColor = "var(--green)"; toast(msg); setTimeout(() => { t.style.background = t.style.color = t.style.borderColor = ""; }, 6000); }
+
+function betPanel(s) {
+  const b = s.bet;
+  if (!b) return panel("betPanel", "Current bet", "none", `<p class="muted" style="margin:0">${esc(s.running ? s.message : "No open bet.")}</p>`);
+  const ended = b.ends_in <= 0, mid = b.mid;
+  const upChance = mid == null ? null : (b.side === "up" ? mid : 1 - mid);
+  return panel("betPanel", "Current bet", `${b.side === "up" ? "📈 Up" : "📉 Down"} · step ${b.step} · ${ended ? "waiting for result" : "ends in " + secs(b.ends_in)}`, `
+    <div style="margin-bottom:8px"><a href="${esc(b.url)}" target="_blank" rel="noopener" data-no-i18n>${esc(b.title)}</a></div>
+    <div class="bet">
+      <div><div class="k">Side</div><div class="v">${sideHtml(b.side)}</div></div>
+      <div><div class="k">Price</div><div class="v num">${(+b.price).toFixed(3)}</div></div>
+      <div><div class="k">Shares</div><div class="v num">${(+b.shares).toFixed(2)}</div></div>
+      <div><div class="k">Cost (fee ${money(b.fee)})</div><div class="v num">${money(b.cost)}</div></div>
+      <div><div class="k">A win pays</div><div class="v num pos">${money(b.shares)} <small>(${money(b.win_profit, true)})</small></div></div>
+      <div><div class="k">${ended ? "Round ended" : "Ends in"}</div><div class="v num">${ended ? "⏳ result soon" : secs(b.ends_in)}</div></div>
+    </div>
+    ${upChance == null || ended ? "" : `<div class="muted" style="margin-top:8px;font-size:12px">Market now: Up ${(upChance * 100).toFixed(0)}% · Down ${(100 - upChance * 100).toFixed(0)}%</div><div class="chance"><b style="width:${(upChance * 100).toFixed(1)}%"></b></div>`}`);
+}
+function renderLadder() {
+  const el = $("#ladderTable"); if (!el || !status) return;
+  const usePreview = preview && (formDirty || ($("#planPrice") && +$("#planPrice").value !== 0.5));
+  const view = usePreview ? preview : status.ladder;
+  $("#ladderPanel").classList.toggle("preview", !!(usePreview && formDirty));
+  if (view.error) { el.innerHTML = `<p class="neg">${esc(view.error)}</p>`; return; }
+  $("#ladderSum").textContent = view.step > 1
+    ? `now at step ${view.step}: this streak lost ${money(view.lost)} · ${view.fits} more bets fit in the ${money(view.left)} left`
+    : `${view.fits} losses in a row fit in ${money(view.budget)}`;
+  $("#ladderNote").textContent = usePreview && formDirty ? "(preview of unsaved settings)" : "";
+  el.innerHTML = `${view.step > 1 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit. A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
+    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
+  </table>`;
+}
+function historyTable(rows) {
+  if (!rows.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
+  const dash = '<span class="muted">–</span>';
+  const slip = t => t.slippage === "" || t.slippage == null ? dash : (+t.slippage ? money(-t.slippage) : "$0.00");
+  const costs = t => {                     // fee + slippage as a share of the bet
+    if (!+t.cost) return dash;
+    const c = (+t.fee || 0) + (+t.slippage || 0);
+    return (c / +t.cost * 100).toFixed(1) + "%";
+  };
+  return `<div class="scroll"><table><tr><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
+      <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
+      <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
+      <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
+    ${rows.map(t => `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
+      <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
+      <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${(+t.shares).toFixed(2)}</td><td class="num">${money(t.cost)}</td>
+      <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
+      <td class="l">${t.side === t.result ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
+      <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td>
+      <td class="num ${tone(t.total_pnl)}">${money(t.total_pnl, true)}</td><td class="num">${money(t.balance)}</td></tr>`).join("")}</table></div>`;
+}
+async function doAct(a) {
+  const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset goes back to 0 (the history is kept).",
+    paper_reset: `Reset the paper account to ${money(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
+    delete: `Delete bot "${status.name}" with its settings, history and log?`,
+    start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${status.settings.budget_usd > 0 ? money(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + money(status.balance) + " can be lost"}\nFirst bet: about ${money(status.ladder.rows[status.step - 1]?.cost)}` : ""};
+  if (a === "delete") {
+    if (!confirm(confirms.delete)) return;
+    try { const d = await api(`/api/bots/${current}/delete`, {}); bots = d.bots; current = bots[0]?.id || ""; status = null; renderBots(); buildForm(); refresh(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  if (a === "check") { const b = $("#checkKeys"); if (b) { b.disabled = true; b.textContent = "Checking…"; } }
+  await act(`/api/bots/${current}/${a}`, {}, confirms[a]);
+  loadBots();
+}
+
+async function refresh() {
+  clearTimeout(timer);
+  if (current) {
+    try {
+      const first = !status;
+      status = await api(`/api/bots/${current}/status`);
+      if (first || !formDirty) fillForm(status.settings);
+      const typing = document.activeElement?.closest?.("#page") && document.activeElement.matches("input");
+      if (!typing) render();   // don't take an input box away while typing in it
+      if (first) schedulePreview();
+      const b = bots.find(x => x.id === current);
+      if (b && (b.running !== status.running || b.step !== status.step || b.pnl !== status.pnl || b.halted !== status.halted)) loadBots();
+    } catch (e) { if (!status) $("#page").innerHTML = `<div class="empty neg">${esc(e.message)}</div>`; }
+  } else render();
+  if (++ticks % 5 === 0) loadBots().catch(() => {});   // every 10 s: bot list, and notice an app restart
+  timer = setTimeout(refresh, 2000);
+}
+
+// --- sign-in (hosted mode) ---
+function showSignIn() {
+  $("#signin").classList.add("on");
+  $("#stepEmail").hidden = false; $("#stepCode").hidden = true; $("#siErr").textContent = "";
+  setTimeout(() => $("#siEmail").focus(), 50);
+}
+async function sendCode() {
+  const email = $("#siEmail").value.trim();
+  $("#siErr").textContent = ""; $("#siSend").disabled = true;
+  try {
+    await api("/api/auth/code", {email});
+    $("#siTo").textContent = email; $("#stepEmail").hidden = true; $("#stepCode").hidden = false; $("#siCode").value = ""; $("#siCode").focus();
+  } catch (e) { $("#siErr").textContent = e.message; }
+  $("#siSend").disabled = false;
+}
+async function verifyCode() {
+  $("#siErr").textContent = ""; $("#siVerify").disabled = true;
+  try {
+    await api("/api/auth/verify", {email: $("#siEmail").value.trim(), code: $("#siCode").value.trim()});
+    location.reload();
+  } catch (e) { $("#siErr").textContent = e.message; }
+  $("#siVerify").disabled = false;
+}
+$("#siSend").onclick = sendCode;
+$("#siEmail").addEventListener("keydown", e => { if (e.key === "Enter") sendCode(); });
+$("#siVerify").onclick = verifyCode;
+$("#siCode").addEventListener("keydown", e => { if (e.key === "Enter") verifyCode(); });
+$("#siCode").addEventListener("input", e => { if (e.target.value.trim().length === 6) verifyCode(); });
+$("#siClose").onclick = () => $("#signin").classList.remove("on");
+$("#addEmail").onclick = showSignIn;
+$("#siBack").onclick = () => { $("#stepEmail").hidden = false; $("#stepCode").hidden = true; };
+$("#signOut").onclick = async () => { try { await api("/api/auth/logout", {}); } catch (e) {} location.reload(); };
+$("#usersBtn").onclick = async () => {
+  try {
+    const d = await api("/api/admin/users");
+    $("#usersTable").innerHTML = `<table><tr><th class="l">Email</th><th class="l">Country</th><th>Bots</th><th>Running</th><th>Live running</th><th class="l">Last sign-in</th></tr>
+      ${d.users.map(u => `<tr><td class="l" data-no-i18n>${esc(u.email)}${u.disabled ? " (disabled)" : ""}</td><td class="l">${esc(u.country)}</td><td class="num">${u.bots}</td><td class="num">${u.running}</td><td class="num">${u.live_running}</td><td class="l num">${u.last_login ? new Date(u.last_login * 1000).toLocaleString() : "–"}</td></tr>`).join("")}</table>`;
+    $("#usersDlg").showModal();
+  } catch (e) { toast(e.message); }
+};
+
+(async () => {
+  if (HOSTED) {
+    try { me = await api("/api/me"); }                 // a first visit becomes a guest: no sign-in needed
+    catch (e) { $("#page").innerHTML = `<div class="empty neg">${esc(e.message)}</div>`; return; }
+    $("#whoBox").hidden = false;
+    $("#who").textContent = me.guest ? "Guest · this browser" : me.email;
+    $("#usersBtn").hidden = !me.admin; $("#addEmail").hidden = !me.guest; $("#signOut").hidden = me.guest;
+  }
+  schema = await api("/api/schema");
+  await loadBots();
+  buildForm();
+  refresh();
+})();
+</script>
+</body>
+</html>

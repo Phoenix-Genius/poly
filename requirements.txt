@@ -1,0 +1,5 @@
+# Paper trading needs only the Python standard library.
+# Live trading uses Polymarket's official SDK (Python 3.11+). It pulls in eth-account, whose ckzg dependency has
+# prebuilt packages only for 64-bit Python up to 3.14, hence the range the start scripts accept.
+polymarket-client==0.17.0
+pycryptodome==3.24.1
