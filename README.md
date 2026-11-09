@@ -134,6 +134,7 @@ use 2.1 or more. recover sizing works it out for you.
 | `base_profit_usd` | 2.5 | recover: what each winning streak earns after fees. |
 | `start_usd` | 3 | multiply: the first bet's cost, fee included. |
 | `multiplier` | 2.2 | multiply: the next bet after a loss is this many times bigger. |
+| `target_steps` | 0 (= off) | Steps to survive: works out the first bet (Profit per win, or Starting bet with multiply) so the budget pays for this many losses in a row even at the Max price. Recalculated at each new streak from the budget left. |
 | `max_steps` | 0 (= budget decides) | End the ladder after this many losses in a row. |
 | `on_ladder_end` | stop | `stop` = halt (press Reset). `reset` = accept the loss and start again at step 1. |
 | `side_mode` | alternate | `alternate` Up/Down/Up…, `follow_last` = what the last finished round was, `opposite_last` = against it, `cheaper` = the lower-priced side, `up_only`, `down_only`, `flip_on_loss`, `flip_on_win`, `random`. |

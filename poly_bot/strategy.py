@@ -53,13 +53,14 @@ class Ladder:
     last_side: str = ""            # side of the bot's last settled bet
     last_won: Optional[bool] = None
     rounds_bet: int = 0            # bets placed since Reset (for the alternate side mode)
+    base: float = 0.0              # Steps to survive: this streak's Profit per win / Starting bet (0 = settings')
 
     def record(self, side: str, won: bool, profit: float) -> None:
         self.pnl += profit
         self.last_side, self.last_won = side, won
         if won:
             self.wins += 1
-            self.step, self.streak_lost = 1, 0.0
+            self.step, self.streak_lost, self.base = 1, 0.0, 0.0
         else:
             self.losses += 1
             self.step += 1
@@ -67,7 +68,7 @@ class Ladder:
 
     def restart(self) -> None:
         """Accept the streak's loss and start again at step 1 (pnl and counts stay)."""
-        self.step, self.streak_lost = 1, 0.0
+        self.step, self.streak_lost, self.base = 1, 0.0, 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -121,6 +122,39 @@ def build_ladder(cfg, p: float, budget: float, rate: float = DEFAULT_FEE_RATE, m
 
 def steps_that_fit(ladder: Sequence[Rung]) -> int:
     return sum(1 for r in ladder if r.fits)
+
+
+@dataclass
+class Sizing:
+    """The sizing settings with the first bet replaced (what Steps to survive works out)."""
+    sizing: str
+    base_profit_usd: float
+    start_usd: float
+    multiplier: float
+    max_steps: int
+
+
+def with_base(cfg, base: float) -> Sizing:
+    """cfg's sizing with the Profit per win (recover) or Starting bet (multiply) set to `base`."""
+    recover = cfg.sizing == "recover"
+    return Sizing(cfg.sizing, base if recover else cfg.base_profit_usd, cfg.start_usd if recover else base,
+                  cfg.multiplier, cfg.max_steps)
+
+
+def base_for_steps(cfg, steps: int, p: float, budget: float, rate: float = DEFAULT_FEE_RATE) -> Optional[float]:
+    """The largest Profit per win (recover) or Starting bet (multiply), in cents, for which `budget` pays for
+    `steps` bets in a row at price p. None when even the smallest bets (5 shares) don't fit."""
+    def fits(base: float) -> bool:
+        return steps_that_fit(build_ladder(with_base(cfg, base), p, budget, rate, max_rows=steps)) >= steps
+    lo, hi = 0.01, max(0.01, budget)
+    if not fits(lo):
+        return None
+    if fits(hi):
+        return floor2(hi)
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+    return floor2(lo)
 
 
 def other(side: str) -> str:
@@ -189,3 +223,17 @@ def walk_asks(asks: Sequence[tuple], shares: float, max_price: float, rate: floa
     if need > 1e-9:
         return None
     return Fill(shares, paid / shares, round(paid + fee, 6), round(fee, 6), used)
+
+
+def streak_sizing(cfg, step: int, base: float, budget: float):
+    """(sizing, base) for a bet at `step` of a streak. Without Steps to survive: (cfg, 0). With it, a new streak
+    (step 1, or no base yet) works out its first bet from `budget` at the Max price; later steps keep `base`.
+    sizing is None when the budget can't pay for the steps."""
+    if not cfg.target_steps:
+        return cfg, 0.0
+    if step == 1 or not base:
+        base = base_for_steps(cfg, cfg.target_steps, cfg.max_price, budget)
+        if base is None:
+            return None, 0.0
+    return with_base(cfg, base), base
+

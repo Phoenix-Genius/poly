@@ -2,8 +2,8 @@ import random
 import unittest
 
 from poly_bot.config import BotConfig
-from poly_bot.strategy import (Ladder, build_ladder, choose_side, cost_of, entry_window, fee_per_share, shares_for,
-                               steps_that_fit, walk_asks)
+from poly_bot.strategy import (Ladder, base_for_steps, build_ladder, choose_side, cost_of, entry_window,
+                               fee_per_share, shares_for, steps_that_fit, streak_sizing, walk_asks, with_base)
 
 
 class FeeTest(unittest.TestCase):
@@ -127,3 +127,31 @@ class MidStreakLadderTest(unittest.TestCase):
         self.assertGreater(rows[0].cost, 13)
         self.assertLess(rows[0].cost, 15)
         self.assertAlmostEqual(rows[0].lost_total, 11.22 + rows[0].cost, places=2)
+
+
+class StepsToSurviveTest(unittest.TestCase):
+    def check(self, sizing):
+        cfg = BotConfig(".", sizing=sizing, target_steps=6, max_price=0.6)
+        base = base_for_steps(cfg, 6, 0.6, 1000)
+        self.assertIsNotNone(base)
+        self.assertEqual(steps_that_fit(build_ladder(with_base(cfg, base), 0.6, 1000, max_rows=6)), 6)
+        self.assertLess(steps_that_fit(build_ladder(with_base(cfg, base + 0.05), 0.6, 1000, max_rows=6)), 6)
+        return base
+
+    def test_recover_sets_profit_per_win(self):
+        self.assertGreater(self.check("recover"), 1)
+
+    def test_multiply_sets_starting_bet(self):
+        self.assertGreater(self.check("multiply"), 10)
+
+    def test_budget_too_small(self):
+        cfg = BotConfig(".", target_steps=10, max_price=0.6)
+        self.assertIsNone(base_for_steps(cfg, 10, 0.6, 20))
+
+    def test_streak_keeps_its_base(self):
+        cfg = BotConfig(".", target_steps=5, max_price=0.6)
+        first, base = streak_sizing(cfg, 1, 0.0, 300)
+        self.assertEqual(streak_sizing(cfg, 3, base, 50)[1], base)        # mid-streak: not recalculated
+        self.assertLess(streak_sizing(cfg, 1, base, 150)[1], base)        # a new streak with less money
+        self.assertIs(streak_sizing(BotConfig("."), 1, 0.0, 300)[0].__class__, BotConfig)   # off
+

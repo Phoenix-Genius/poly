@@ -73,6 +73,16 @@ class PaperClient:
             self._save()
             return payout
 
+    def set_start(self, start: float) -> float:
+        """A new Paper balance without a reset: the balance moves by the difference, so profit, open bets and the
+        ladder stay (start 1000, balance 1041.93, new start 10000 -> balance 10041.93). Returns the new balance."""
+        with self._lock:
+            old = float(self.data.get("start_balance", self.data.get("balance", 0.0)))
+            self.data["balance"] = max(0.0, float(self.data.get("balance", 0.0)) + float(start) - old)
+            self.data["start_balance"] = float(start)
+            self._save()
+            return self.data["balance"]
+
     def reset(self, balance: float) -> None:
         with self._lock:
             self.data = {"balance": float(balance), "start_balance": float(balance), "positions": {}}

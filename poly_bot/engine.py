@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from .config import BotConfig, write_json
 from .markets import MarketError, Polymarket
-from .strategy import Ladder, choose_side, cost_of, entry_window, shares_for
+from .strategy import Ladder, choose_side, cost_of, entry_window, shares_for, streak_sizing
 from .trades import append_trade
 
 SETTLE_CHECK_SEC = 10          # how often to ask whether an ended round has resolved
@@ -94,6 +94,17 @@ class Bot:
         if self.cfg.budget_usd > 0:
             return max(0.0, min(bal, self.cfg.budget_usd + self.ladder.pnl))
         return bal
+
+    def sizing(self):
+        """The sizing for the next bet (see strategy.streak_sizing); remembers a new streak's Steps-to-survive bet."""
+        cfg, lad = self.cfg, self.ladder
+        sizing, base = streak_sizing(cfg, lad.step, lad.base, self.budget_left())
+        if sizing is not None and cfg.target_steps and base != lad.base:
+            lad.base = base
+            self.log.info("Steps to survive %d: %s $%.2f for this streak (budget left $%.2f, at price %.2f)",
+                          cfg.target_steps, "Profit per win" if cfg.sizing == "recover" else "Starting bet",
+                          base, self.budget_left(), cfg.max_price)
+        return sizing
 
     def earned_since_start(self) -> float:
         return self.ladder.pnl - self.start_pnl
@@ -229,7 +240,12 @@ class Bot:
         if price < cfg.min_price - 1e-9:
             return self._wait(f"{side.upper()} costs {price}, below the min price {cfg.min_price:.2f}; waiting "
                               f"(window ends in {fmt_secs(window - elapsed)})", key=f"cheap:{cur.slug}:{side}")
-        shares = max(shares_for(cfg, self.ladder.step, self.ladder.streak_lost, price, cur.fee_rate,
+        sizing = self.sizing()
+        if sizing is None:
+            return self._halt("budget", f"${self.budget_left():.2f} left can't pay for {cfg.target_steps} bets in "
+                                        f"a row (Steps to survive), even at 5 shares each: lower Steps to survive "
+                                        f"or add money, then Start again.")
+        shares = max(shares_for(sizing, self.ladder.step, self.ladder.streak_lost, price, cur.fee_rate,
                                 cur.fee_exponent), cur.min_size)
         est = cost_of(shares, price, cur.fee_rate, cur.fee_exponent)
         if est > self.budget_left() + 1e-9:

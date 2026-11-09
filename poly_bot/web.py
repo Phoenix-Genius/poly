@@ -27,7 +27,7 @@ from .instance import PROFILES_DIR, ROOT, AlreadyRunning, acquire_lock, bot_ids,
 from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
-from .strategy import build_ladder, steps_that_fit
+from .strategy import build_ladder, steps_that_fit, streak_sizing
 from .trades import read_trades
 
 log = logging.getLogger("poly")
@@ -182,6 +182,9 @@ class Controller:
             self.last_check = {}
             self.log.info("Switched to %s", "LIVE trading (real money)" if cfg.is_live else "paper trading")
         else:
+            if cfg.is_paper and cfg.paper_balance_usd != self.cfg.paper_balance_usd:
+                bal = self.bot.client.set_start(cfg.paper_balance_usd)
+                self.log.info("Paper balance set to $%.2f: balance now $%.2f (profit kept)", cfg.paper_balance_usd, bal)
             self.bot.cfg = cfg   # the loop reads cfg every tick, so a running bot uses the new settings at once
         self.log.info("Settings saved")
         return self.status()
@@ -216,9 +219,21 @@ class Controller:
             raise ValueError("Price must be between 0.02 and 0.98")
         lad = self.bot.ladder
         if body.get("from_now"):      # the current streak with these settings; else a fresh ladder from step 1
-            return ladder_view(cfg, price, self._budget(cfg) + lad.streak_lost, lad.step, lad.streak_lost,
-                               streak_bets(read_trades(self.cfg.trade_log), lad.step))
-        return ladder_view(cfg, price, self._budget(cfg) + lad.streak_lost)
+            return self._ladder(cfg, price, lad.step, lad.base if cfg.target_steps == self.cfg.target_steps else 0)
+        return self._ladder(cfg, price, 1, 0.0)
+
+    def _ladder(self, cfg: BotConfig, price: float, step: int, base: float) -> dict:
+        """ladder_view for the current streak (or a fresh one at step 1), with Steps to survive worked out."""
+        lad = self.bot.ladder
+        lost = lad.streak_lost if step > 1 else 0.0
+        budget = self._budget(cfg) + lad.streak_lost
+        sizing, base = streak_sizing(cfg, step, base, budget - lost)
+        view = ladder_view(sizing or cfg, price, budget, step, lost,
+                           streak_bets(read_trades(self.cfg.trade_log), step) if step > 1 else None)
+        view["auto"] = None if not cfg.target_steps else {
+            "steps": cfg.target_steps, "base": base if sizing else None, "price": cfg.max_price,
+            "label": "Profit per win" if cfg.sizing == "recover" else "Starting bet"}
+        return view
 
     def _budget(self, cfg: BotConfig) -> float:
         bal = (self.balance() or 0.0) + (self.bot.bet["cost"] if self.bot.bet else 0.0)
@@ -227,12 +242,33 @@ class Controller:
         return bal
 
     # --- views -------------------------------------------------------------------------------------------
-    def summary(self) -> dict:
+    def summary(self, full: bool = False) -> dict:
+        """The bot list's card. full=False: only what status() repeats anyway (no balance or ladder work)."""
         b = self.bot
-        return {"id": self.id, "name": self.cfg.display_name, "coin": self.cfg.coin, "timeframe": self.cfg.timeframe,
-                "network": self.cfg.network, "running": self.running, "halted": b.halted, "step": b.ladder.step,
-                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
-                "locked": self.locked_elsewhere}
+        out = {"id": self.id, "name": self.cfg.display_name, "coin": self.cfg.coin, "timeframe": self.cfg.timeframe,
+               "network": self.cfg.network, "running": self.running, "halted": b.halted, "step": b.ladder.step,
+               "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
+               "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses}
+        if full:
+            phase, message = self._phase()
+            bal = self.balance()
+            try:
+                lad = self._ladder(self.cfg, 0.5, b.ladder.step, b.ladder.base)
+                nxt = next((r for r in lad["rows"] if r["step"] == b.ladder.step and not r.get("played")), None)
+                fits, next_cost = max(lad["fits"] + b.ladder.step - 1, b.ladder.step), nxt["cost"] if nxt else None
+            except Exception:                 # a card must never fail the whole list
+                fits, next_cost = b.ladder.step, None
+            out.update(phase=phase, message=message, balance=None if bal is None else round(bal, 2), fits=fits,
+                       next_cost=next_cost, bet_cost=round(b.bet["cost"], 2) if b.bet else None)
+        return out
+
+    def _phase(self) -> tuple[str, str]:
+        b = self.bot
+        if self.running:
+            return b.phase, b.message
+        if b.halted:
+            return "halted", b.halt_message
+        return "idle", "Stopped. A bet is open; it's paid out when you Start." if b.bet else "Stopped"
 
     def status(self) -> dict:
         b, now = self.bot, time.time()
@@ -243,11 +279,7 @@ class Controller:
             bet["mid"] = b.live.get("mid")
             bet["ends_in"] = max(0, b.bet["end"] - now)
             bet["win_profit"] = round(b.bet["shares"] - b.bet["cost"], 2)
-        phase, message = b.phase, b.message
-        if not self.running:
-            phase = "halted" if b.halted else "idle"
-            message = b.halt_message if b.halted else ("Stopped. A bet is open; it's paid out when you Start."
-                                                       if b.bet else "Stopped")
+        phase, message = self._phase()
         trades = read_trades(self.cfg.trade_log)
         next_start = b.live.get("next_start") if self.running and not b.bet else None
         return {
@@ -263,8 +295,7 @@ class Controller:
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",
-            "ladder": ladder_view(self.cfg, 0.5, self._budget(self.cfg) + b.ladder.streak_lost, b.ladder.step,
-                                  b.ladder.streak_lost, streak_bets(trades, b.ladder.step)),
+            "ladder": self._ladder(self.cfg, 0.5, b.ladder.step, b.ladder.base),
             "trades": list(reversed(trades[-100:])),
             "trade_count": len(trades),
             "log": list(self.lines.lines)[-150:],
@@ -321,7 +352,8 @@ class App:
         return self.controllers[bot_id]
 
     def list(self) -> dict:
-        return {"bots": [c.summary() for c in self.controllers.values()], "version": __version__, "started": STARTED}
+        return {"bots": [c.summary(full=True) for c in self.controllers.values()], "version": __version__,
+                "started": STARTED}
 
     def create(self, body: dict) -> dict:
         if self.max_bots and len(self.controllers) >= self.max_bots:

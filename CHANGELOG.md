@@ -4,6 +4,51 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-10
+
+### Fixed: a new Paper balance didn't change the balance
+- **What:** saving a new **Paper balance** now changes the paper account at once (before, only **Reset paper**
+  did). Profit, history, the ladder and an open bet stay: the balance moves by the difference (start $1,000, balance
+  $1,041.93, new Paper balance $10,000 → $10,041.93). Also: an open page reloads itself when the app restarts (unless
+  settings are unsaved), so it never shows an old version.
+- **Why:** the owner: "when i change the paper balance, but not changed on main part's balance." (Their tab also still
+  showed the page from before the update.)
+- **How:** `PaperClient.set_start`; `Controller.put_settings` calls it when a paper bot's Paper balance changes;
+  `loadBots` reloads the page when `started` changes.
+- **Tests:** `test_web`: a new Paper balance shows in the balance and the start balance without Reset paper.
+
+### Bot list and settings look like the hyperliquid bot
+- **What:** the bot list is a column of cards: name, paper/LIVE badge, coin and round length, balance, profit, wins and
+  losses, a step bar with the next bet (or the open bet), the status line and a Start/Stop button on each card. Above
+  them: **Bots N**, **＋ New bot**, and totals (running, Paper P&L, Live P&L). Theme and version sit at the bottom.
+  The settings column shows the bot's name, **Settings** with the network and market, and the settings as chips
+  (Budget, Until earn, Profit/win or Start, Sizing, Survive, Ladder end, Price, Side, Entry). **Details ▾** opens the
+  full form, grouped in coloured boxes (Market & money, Bet size, Loss recovery, Side, Entry); clicking a chip opens
+  it at that setting. The save bar says *All changes saved* / *Unsaved changes*, with **Discard** and **Save
+  settings**. Empty boxes say what empty means (whole balance, off, no limit, auto). Settings can still be changed
+  while a bot runs.
+- **Why:** the owner: "poly bot list and settins section should be looks like as hl."
+- **How:** `index.html` (CSS, layout 290/440 px like hl, JS `renderBots`, `renderSettingsHead`, `GROUPS`,
+  `setDetails`, `setDirty`); `Controller.summary(full=True)` adds balance, wins/losses, status, steps that fit, next
+  bet cost and open bet cost for the cards (`/api/bots`); `_phase()` shared with `status()`.
+- **Tests:** the existing web tests; checked in headless Chromium (light and dark) against a local copy.
+
+### Steps to survive (like the hyperliquid bot)
+- **What:** a new setting **Steps to survive** (in Bet size). Set e.g. 7 and the bot works out the first bet so the
+  budget pays for 7 losses in a row, even if every bet costs the Max price: recover sizing sets the Profit per win,
+  multiply sizing the Starting bet (that box is hidden while it's on). It's worked out again at each new streak
+  (step 1) from the budget left, so bets grow after wins and shrink after a lost streak; mid-streak it stays. The
+  ladder panel says what it chose ("Profit per win $3.17 for this streak"). If even 5-share bets can't cover the
+  steps, the bot stops with a message. 0 or empty = off.
+- **Why:** the owner: "add survive setting plz".
+- **How:** `config.target_steps` (0–30; Max losses in a row may not be below it); `strategy.base_for_steps` (binary
+  search on the Profit per win / Starting bet, in cents, using `build_ladder` at the Max price), `with_base`,
+  `streak_sizing`; `Ladder.base` keeps the streak's value (reset on a win or restart); `Bot.sizing()` in `_enter`;
+  the web ladder view and plan use the same sizing and return `auto`.
+- **Tests:** `StepsToSurviveTest` (recover and multiply fit exactly the steps and not a cent more, budget too small,
+  mid-streak keeps its value), engine `test_steps_to_survive` (value kept through losses, reset after a win, the win
+  earns it) and `test_steps_to_survive_too_few_funds`, web plan returns `auto` and the Max-losses check.
+
 ## [0.1.0] - 2026-11-09
 
 ### Min price setting

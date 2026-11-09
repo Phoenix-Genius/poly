@@ -32,30 +32,63 @@
   .muted { color: var(--muted); }
   .pos { color: var(--green); } .neg { color: var(--red); }
 
-  /* layout: bot list | settings | page, each scrolls by itself */
-  .app { display: grid; grid-template-columns: 220px 300px 1fr; height: 100vh; }
+  /* layout: bot list | settings | page, each scrolls by itself (like the hyperliquid bot) */
+  .app { display: grid; grid-template-columns: 290px 440px minmax(0, 1fr); height: 100vh; }
+  @media (max-width: 1300px) { .app { grid-template-columns: 250px 380px minmax(0, 1fr); } }
+  body.no-bots #setCol { display: none; }
+  body.no-bots .app { grid-template-columns: 290px minmax(0, 1fr); }
   .col { overflow-y: auto; min-width: 0; }
-  #botsCol { background: var(--side-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
-  #setCol { background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #botsCol { background: var(--side-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  #setCol { background: var(--page-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   #mainCol { padding: 14px 18px 40px; }
   @media (max-width: 900px) {
-    .app { display: block; height: auto; }
-    .col { overflow: visible; }
+    .app, body.no-bots .app { display: block; height: auto; }
+    .col, #botsCol { overflow: visible; }
     #mainCol { padding: 12px 16px 40px; }
+    #bots { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+    #bots .bot-item { min-width: 230px; }
   }
+  .spacer { flex: 1; }
 
-  /* bot list */
-  .brand { padding: 12px 14px 8px; font-weight: 700; }
-  .brand small { font-weight: 400; color: var(--muted); }
-  #bots { flex: 1; }
-  .bot-item { display: flex; gap: 8px; align-items: center; padding: 8px 14px; cursor: pointer; border-left: 3px solid transparent; }
-  .bot-item:hover { background: var(--active-bg); }
-  .bot-item.active { background: var(--active-bg); border-left-color: var(--accent); }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; flex: none; }
+  /* bot list: cards on the tinted sidebar, a stripe for the state (green running, red halted, grey stopped) */
+  #leftScroll { flex: 1; min-height: 0; overflow-y: auto; }
+  #side { padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .side-head { display: flex; align-items: center; gap: 8px; }
+  .side-head h2 { margin: 0; font-size: 17px; }
+  .side-head .btn { padding: 6px 12px; font-weight: 600; }
+  .side-totals { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px; }
+  .side-totals > span { background: var(--panel); border: 1px solid var(--line); padding: 1px 8px; }
+  .side-totals b { color: var(--text); }
+  #bots { display: flex; flex-direction: column; gap: 8px; }
+  .bot-item { display: block; border: 1px solid var(--line); border-left: 4px solid var(--state, var(--line)); padding: 9px 10px 9px 9px;
+              background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s; }
+  .bot-item.st-run { --state: var(--green); } .bot-item.st-halt { --state: var(--red); }
+  .bot-item.st-stop { --state: #9ca3af; } .bot-item.st-lock { --state: var(--amber); }
+  .bot-item:hover { border-color: var(--muted); border-left-color: var(--state); }
+  .bot-item.active { border-color: var(--accent); border-left-color: var(--state, var(--accent)); background: var(--active-bg); box-shadow: 0 0 0 1px var(--accent); }
+  .bi-top { display: flex; align-items: center; gap: 7px; }
+  .bi-name { font-weight: 650; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bi-line { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bi-money { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .bi-money .bal { font-size: 15px; font-weight: 700; }
+  .bi-money .pnl { font-size: 12px; font-weight: 650; }
+  .bi-money .wl { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .bi-steps { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bi-steps .steps { flex: 1; min-width: 0; margin: 0; }
+  .bi-steps .steps i { height: 4px; max-width: 16px; }
+  .bi-steps b { color: var(--text); font-weight: 650; }
+  .bi-status { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; min-height: 22px; }
+  .bi-status .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .bi-status .txt.halt { color: var(--red); font-weight: 600; }
+  .bi-act { border: 0; background: none; padding: 2px 7px; font-size: 12px; color: var(--muted); font-weight: 600; cursor: pointer; flex: none; }
+  .bi-act:hover { background: var(--line); color: var(--text); }
+  .bi-act .go { color: var(--green); } .bi-act .stop { color: var(--red); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; flex: none; display: inline-block; }
   .dot.run { background: var(--green); } .dot.halt { background: var(--red); } .dot.lock { background: var(--amber); }
-  .bot-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bot-item .sub { font-size: 12px; color: var(--muted); }
-  .side-foot { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+  #whoBox { padding-bottom: 10px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  #whoBox .btn { padding: 3px 8px; font-size: 12px; }
+  #leftFoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  #leftFoot .btn { padding: 4px 8px; font-size: 13px; }
 
   /* buttons */
   .btn { border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
@@ -67,18 +100,56 @@
   .dark .btn.go, .dark .btn.stop, .dark .btn.primary { color: #0b0d11; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
-  /* settings */
-  #setCol h3 { margin: 0; padding: 12px 14px 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-  #form { padding: 4px 14px 14px; flex: 1; }
-  .field { margin: 10px 0; }
-  .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 3px; }
-  .field input, .field select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); background: var(--input); }
+  /* settings: name, "Settings" + network and market, the settings as chips; the full form under Details */
+  .set-top { position: sticky; top: 0; z-index: 3; background: var(--section-bg); padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+  #setBotName { font-size: 17px; font-weight: 700; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .set-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .set-title h2 { margin: 0; font-size: 15px; }
+  #detailsBtn { margin-left: auto; padding: 3px 10px; font-size: 12.5px; }
+  #detailsBtn .chev { display: inline-block; transition: transform .15s; }
+  #setCol.details-open #detailsBtn .chev { transform: rotate(180deg); }
+  #setCol.details-open #detailsBtn { border-color: var(--accent); color: var(--accent); }
+  #setCol:not(.details-open) #form { display: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; font-size: 12px; background: var(--panel);
+          border: 1px solid var(--line); white-space: nowrap; line-height: 1.5; }
+  .chip .k { color: var(--muted); }
+  .chip b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .chip.market b { font-size: 13px; }
+  .chip.paper { color: #6d28d9; background: #ede9fe; border: none; font-weight: 600; }
+  .dark .chip.paper { background: #2e2350; color: #c4b5fd; }
+  .chip.live { color: #fff; background: var(--red); border: none; font-weight: 700; }
+  .dark .chip.live { color: #0b0d11; }
+  .chip.warn { border-color: var(--amber); background: var(--amber-bg); } .chip.warn b, .chip.warn .k { color: var(--amber); }
+  .chip[data-edit] { cursor: pointer; } .chip[data-edit]:hover { border-color: var(--accent); }
+  .chips.pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 6px; }
+  .chips.pairs .chip { justify-self: start; max-width: 100%; min-width: 0; overflow: hidden; }
+  .chips.pairs .chip > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .summary-box { background: var(--panel); border: 1px solid var(--line); padding: 8px 10px; }
+  #form { padding: 12px 14px 4px; flex: 1; }
+  .card { --tone: var(--muted); border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line)); margin-bottom: 10px;
+          background: color-mix(in srgb, var(--tone) 3%, var(--panel)); }
+  .card > .card-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: color-mix(in srgb, var(--tone) 13%, var(--panel));
+                       border-bottom: 1px solid color-mix(in srgb, var(--tone) 28%, var(--line)); }
+  .card-ico { width: 22px; height: 22px; flex: none; display: grid; place-items: center; font-size: 13px; background: var(--panel);
+              box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 35%, transparent); }
+  .card-title { font-weight: 700; font-size: 13px; }
+  .card-body { padding: 8px 10px 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; }
+  .tone-money { --tone: #2563eb; } .tone-target { --tone: #db2777; } .tone-recover { --tone: #7c3aed; }
+  .tone-dir { --tone: #0891b2; } .tone-adv { --tone: #64748b; }
+  .dark .tone-money { --tone: #5b8def; } .dark .tone-target { --tone: #f472b6; } .dark .tone-recover { --tone: #a78bfa; }
+  .dark .tone-dir { --tone: #22d3ee; } .dark .tone-adv { --tone: #94a3b8; }
+  .field { margin: 0; min-width: 0; }
+  .card-body .field.wide { grid-column: 1 / -1; }
+  .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 2px; cursor: help; }
+  .field input, .field select { width: 100%; padding: 4px 8px; font-size: 13px; border: 1px solid var(--line); background: var(--input); }
   .field .help { font-size: 12px; color: var(--muted); margin-top: 3px; display: none; }
   .field:focus-within .help { display: block; }   /* compact: a field's help shows while you edit it */
-  .field label { cursor: help; }
   .field.hide { display: none; }
-  .savebar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; align-items: center; }
-  .savebar .msg { font-size: 12px; }
+  .savebar { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px;
+             display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .savebar .btn { flex: none; white-space: nowrap; }
+  .savebar.dirty #saveMsg { color: var(--amber); font-weight: 600; }
 
   /* page */
   .head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
@@ -154,21 +225,28 @@
 <body>
 <div class="app">
   <aside class="col" id="botsCol">
-    <div class="brand">🎲 Poly Martingale <small>v{{version}}</small></div>
-    <div id="bots"></div>
-    <div class="side-foot">
-      <button class="btn primary" id="newBot">＋ New bot</button>
-      <button class="btn" id="theme" title="Light / dark">◐ Theme</button>
-      <div id="whoBox" hidden><div class="who" id="who" data-no-i18n></div>
-        <div class="actions" style="margin-top:6px"><button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>⎋ Sign out</button></div>
-        <div class="credit" style="margin-top:6px"><a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></div></div>
-    </div>
+    <div id="leftScroll"><div id="side">
+      <div id="whoBox" hidden><span class="who" id="who" data-no-i18n></span><span class="spacer"></span>
+        <button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>Sign out</button></div>
+      <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><span class="spacer"></span>
+        <button class="btn primary" id="newBot" title="Create a paper or live bot">＋ New bot</button></div>
+      <div class="side-totals" id="sideTotals"></div>
+      <nav id="bots"></nav>
+    </div></div>
+    <div id="leftFoot"><button class="btn" id="theme" title="Light / dark">◐</button><span>🎲 Poly Martingale v{{version}}</span>
+      <span class="spacer"></span><a class="credit" id="dbipCredit" hidden href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></div>
   </aside>
 
   <aside class="col" id="setCol">
-    <h3>Settings</h3>
+    <div class="set-top">
+      <div id="setBotName" data-no-i18n></div>
+      <div class="set-title"><h2>Settings</h2><span class="chips" id="setIdChips"></span>
+        <button class="btn" id="detailsBtn" type="button" aria-expanded="false"><span>Details</span><span class="chev" aria-hidden="true">▾</span></button></div>
+      <div id="summary" class="summary-box"></div>
+    </div>
     <div id="form"></div>
-    <div class="savebar"><button class="btn primary" id="save">💾 Save settings</button><span class="msg muted" id="saveMsg"></span></div>
+    <div class="savebar" id="saveBar"><span id="saveMsg" class="muted">All changes saved</span><span class="spacer"></span>
+      <button class="btn" id="discard" disabled>Discard</button><button class="btn primary" id="save" disabled>Save settings</button></div>
   </aside>
 
   <main class="col" id="mainCol">
@@ -249,27 +327,57 @@ async function loadBots() {
   const d = await api("/api/bots");
   bots = d.bots;
   if (schema && d.started && d.started !== schema.started && !formDirty) {
-    // the app was restarted (maybe updated): fetch the settings list again so new settings and options show up
-    schema = await api("/api/schema");
-    buildForm();
-    if (status) fillForm(status.settings);
+    // the app was restarted (maybe updated): reload, so an open tab gets the new page and settings
+    location.reload();
+    return;
   }
   if (!bots.find(b => b.id === current)) current = bots[0]?.id || "";
   renderBots();
 }
+function stepPips(step, fits) {
+  const n = Math.min(Math.max(fits || 1, step), 20);
+  return Array.from({length: n}, (_, i) => `<i class="${i + 1 < step ? "on" : i + 1 === step ? "now" : ""}"></i>`).join("");
+}
 function renderBots() {
+  const running = bots.filter(b => b.running).length;
+  const sum = f => bots.filter(f).reduce((a, b) => a + (b.pnl || 0), 0);
+  const live = bots.some(b => b.network === "live");
+  $("#sideCount").textContent = bots.length || "";
+  $("#sideTotals").innerHTML = `<span><span class="dot run"></span> ${running} running</span>` +
+    `<span>Paper P&amp;L <b class="${tone(sum(b => b.network !== "live"))}">${money(sum(b => b.network !== "live"), true)}</b></span>` +
+    (live ? `<span>Live P&amp;L <b class="${tone(sum(b => b.network === "live"))}">${money(sum(b => b.network === "live"), true)}</b></span>` : "");
+  document.body.classList.toggle("no-bots", !bots.length);
   $("#bots").innerHTML = bots.map(b => {
-    const dot = b.locked ? "lock" : b.running ? "run" : b.halted ? "halt" : "";
-    return `<div class="bot-item ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}">
-      <span class="dot ${dot}"></span>
-      <span class="name" data-no-i18n>${esc(b.name)}<div class="sub">${esc(b.coin)} · ${esc(b.timeframe)} · step ${b.step}</div></span>
-      <span class="num ${tone(b.pnl)}">${money(b.pnl, true)}</span></div>`;
+    const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
+    const act = b.locked ? "" : b.running
+      ? `<button class="bi-act" data-stop="${esc(b.id)}" title="Stop this bot"><span class="stop">■</span> Stop</button>`
+      : `<button class="bi-act" data-start="${esc(b.id)}" title="Start this bot"><span class="go">▶</span> Start</button>`;
+    const next = b.bet_side ? `${b.bet_side === "up" ? "📈 Up" : "📉 Down"} <b>${money(b.bet_cost)}</b>` : `🎯 next <b>${money(b.next_cost)}</b>`;
+    return `<div class="bot-item st-${st} ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}">
+      <div class="bi-top"><span class="dot ${st === "stop" ? "" : st}"></span><span class="bi-name" data-no-i18n>${esc(b.name)}</span>
+        <span class="chip ${b.network === "live" ? "live" : "paper"}">${b.network === "live" ? "LIVE" : "paper"}</span></div>
+      <div class="bi-line">${esc(b.coin)} · ${esc(b.timeframe)} rounds</div>
+      <div class="bi-money"><span class="bal" title="${b.network === "live" ? "pUSD balance" : "Paper balance"}">${money(b.balance)}</span>
+        <span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
+      <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.step}</b> · ${next}</span></div>
+      <div class="bi-status"><span class="txt ${b.halted ? "halt" : ""}" title="${esc(b.message)}">${esc(b.message || "")}</span>${act}</div>
+    </div>`;
   }).join("");
   for (const el of document.querySelectorAll(".bot-item")) el.onclick = () => select(el.dataset.id);
+  for (const el of document.querySelectorAll(".bi-act")) el.onclick = async e => {
+    e.stopPropagation();
+    const id = el.dataset.start || el.dataset.stop, b = bots.find(x => x.id === id);
+    if (el.dataset.start && b?.network === "live" && !confirm(`Start "${b.name}" LIVE trading with REAL money?`)) return;
+    el.disabled = true;
+    try { const s = await api(`/api/bots/${id}/${el.dataset.start ? "start" : "stop"}`, {}); if (id === current && s?.settings) { status = s; render(); } }
+    catch (err) { toast(err.message); }
+    loadBots();
+  };
 }
 function select(id) {
   if (formDirty && id !== current && !confirm("Discard unsaved settings?")) return;
   current = id; localStorage.setItem("bot", id); formDirty = false; status = null;
+  if (id && location.hash !== "#bot=" + id) history.replaceState(null, "", "#bot=" + id);
   renderBots(); buildForm(); refresh();
 }
 
@@ -290,24 +398,45 @@ $("#newDlg").addEventListener("close", async () => {
   } catch (e) { toast(e.message); }
 });
 
-// --- settings form, built from the schema ---
+// --- settings form, built from the schema, in groups like the hyperliquid bot ---
 const SIZING_ONLY = {base_profit_usd: "recover", start_usd: "multiply", multiplier: "multiply"};
-const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec"];   // shown empty when 0
+const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
+const GROUPS = [
+  {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
+  {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "multiplier"]},
+  {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
+  {title: "Side", icon: "🧭", tone: "dir", keys: ["side_mode", "first_side"]},
+  {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
+];
+const WIDE = ["bot_name"];
+const PLACEHOLDER = {bot_name: "e.g. BTC fast", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
+  entry_window_sec: "auto"};
+function fieldHtml(f) {
+  let input;
+  if (f.type === "select") input = `<select name="${f.key}">${f.options.map(o => `<option value="${o}">${o}</option>`).join("")}</select>`;
+  else if (f.type === "bool") input = `<input type="checkbox" name="${f.key}" style="width:auto">`;
+  else input = `<input name="${f.key}" ${f.type === "text" ? "" : 'inputmode="decimal"'} autocomplete="off" placeholder="${PLACEHOLDER[f.key] || ""}">`;
+  return `<div class="field ${WIDE.includes(f.key) ? "wide" : ""}" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
+}
 function buildForm() {
   const form = $("#form");
-  if (!current || !schema) { form.innerHTML = '<p class="muted">No bot yet.</p>'; return; }
-  form.innerHTML = schema.fields.map(f => {
-    let input;
-    if (f.type === "select") input = `<select name="${f.key}">${f.options.map(o => `<option value="${o}">${o}</option>`).join("")}</select>`;
-    else if (f.type === "bool") input = `<input type="checkbox" name="${f.key}" style="width:auto">`;
-    else input = `<input name="${f.key}" ${f.type === "text" ? "" : 'inputmode="decimal"'} autocomplete="off">`;
-    return `<div class="field" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
+  if (!current || !schema) { form.innerHTML = '<p class="muted">No bot yet.</p>'; $("#summary").innerHTML = $("#setIdChips").innerHTML = $("#setBotName").textContent = ""; return; }
+  const byKey = Object.fromEntries(schema.fields.map(f => [f.key, f])), used = new Set(GROUPS.flatMap(g => g.keys));
+  const rest = schema.fields.filter(f => !used.has(f.key)).map(f => f.key);
+  form.innerHTML = GROUPS.map((g, i) => {
+    const keys = [...g.keys, ...(i === GROUPS.length - 1 ? rest : [])].filter(k => byKey[k]);
+    return `<div class="card tone-${g.tone}"><div class="card-head"><span class="card-ico">${g.icon}</span><span class="card-title">${g.title}</span></div>
+      <div class="card-body">${keys.map(k => fieldHtml(byKey[k])).join("")}</div></div>`;
   }).join("");
-  for (const el of form.querySelectorAll("input,select")) {
-    el.addEventListener("input", () => { formDirty = true; $("#saveMsg").textContent = "unsaved"; showFields(); schedulePreview(); });
-  }
-  formDirty = false;
+  for (const el of form.querySelectorAll("input,select")) el.addEventListener("input", () => { setDirty(true); showFields(); schedulePreview(); });
+  setDirty(false);
+}
+function setDirty(d) {
+  formDirty = d;
+  $("#saveBar").classList.toggle("dirty", d);
+  $("#saveMsg").textContent = d ? "Unsaved changes" : "All changes saved";
+  $("#save").disabled = $("#discard").disabled = !d;
 }
 function fillForm(settings) {
   for (const [k, v] of Object.entries(settings)) {
@@ -324,16 +453,60 @@ function formValues() {
 }
 function showFields() {
   const v = formValues();
-  for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing);
+  const auto = +v.target_steps > 0;   // Steps to survive works out the first bet: its box isn't used then
+  for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier"));
   $('.field[data-key="first_side"]')?.classList.toggle("hide", !SIDE_FIRST.includes(v.side_mode));
   $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
+  renderSettingsHead(v);
 }
+// the settings at a glance: what the form says now (unsaved edits included); click a chip to edit that setting
+function renderSettingsHead(v) {
+  if (!current || !v.coin) return;
+  const n = x => +x || 0;
+  const b = bots.find(x => x.id === current);
+  $("#setBotName").textContent = v.bot_name || b?.name || current;
+  const chip = (icon, k, val, edit, extra = "", cls = "") => `<span class="chip ${cls}" data-edit="${edit}" title="Change"><span aria-hidden="true">${icon}</span><span class="k">${k}</span><b>${val}</b>${extra ? `<span class="k">${extra}</span>` : ""}</span>`;
+  $("#setIdChips").innerHTML = `<span class="chip ${v.network === "live" ? "live" : "paper"}" data-edit="network" title="Change">${v.network === "live" ? "💵 LIVE" : "📝 paper"}</span>` +
+    `<span class="chip market" data-edit="coin" title="Change"><b>${esc(v.coin)} · ${esc(v.timeframe)}</b></span>`;
+  const auto = n(v.target_steps) > 0;
+  const bet = v.sizing === "recover"
+    ? chip("🎯", "Profit/win", auto ? "auto" : money(n(v.base_profit_usd)), auto ? "target_steps" : "base_profit_usd")
+    : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
+  const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
+    up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
+  const win = n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
+  $("#summary").innerHTML = `<div class="chips pairs">` + [
+    chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd"),
+    chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
+    bet,
+    chip("📐", "Sizing", v.sizing === "recover" ? "recover" : `×${esc(v.multiplier)}`, "sizing"),
+    chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps"),
+    chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
+    chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
+    chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
+    chip("⏱️", "Entry", win, "entry_window_sec"),
+  ].join("") + `</div>`;
+}
+function setDetails(open) {
+  $("#setCol").classList.toggle("details-open", open);
+  $("#detailsBtn").setAttribute("aria-expanded", open);
+  localStorage.setItem("details", open ? "1" : "");
+}
+setDetails(!!localStorage.getItem("details"));
+$("#detailsBtn").onclick = () => setDetails(!$("#setCol").classList.contains("details-open"));
+$("#setCol").addEventListener("click", e => {
+  const c = e.target.closest(".chip[data-edit]"); if (!c) return;
+  setDetails(true);
+  const el = $(`#form [name="${c.dataset.edit}"]`);
+  if (el) { el.scrollIntoView({block: "center"}); el.focus(); }
+});
 $("#save").onclick = async () => {
   try {
     status = await api(`/api/bots/${current}/settings`, formValues());
-    formDirty = false; $("#saveMsg").textContent = "saved ✓"; fillForm(status.settings); render(); loadBots();
-  } catch (e) { $("#saveMsg").textContent = ""; toast(e.message); }
+    setDirty(false); fillForm(status.settings); render(); loadBots();
+  } catch (e) { toast(e.message); }
 };
+$("#discard").onclick = () => { if (status) { setDirty(false); fillForm(status.settings); preview = null; schedulePreview(); renderLadder(); } };
 
 // --- ladder preview of unsaved settings ---
 let preview = null;
@@ -457,7 +630,11 @@ function renderLadder() {
     ? `now at step ${view.step}: this streak lost ${money(view.lost)} · ${view.fits} more bets fit in the ${money(view.left)} left`
     : `${view.fits} losses in a row fit in ${money(view.budget)}`;
   $("#ladderNote").textContent = usePreview && formDirty ? "(preview of unsaved settings)" : "";
-  el.innerHTML = `${view.step > 1 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit. A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
+  const a = view.auto;
+  const autoNote = !a ? "" : a.base == null
+    ? `<p class="neg" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: the budget can't pay for ${a.steps} bets in a row even at 5 shares each.</p>`
+    : `<p class="muted" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: ${a.label} <b>${money(a.base)}</b> for this streak, so ${a.steps} losses in a row fit even if every bet costs ${a.price.toFixed(2)}.</p>`;
+  el.innerHTML = autoNote + `${view.step > 1 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit. A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
     ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
   </table>`;
 }
@@ -561,8 +738,8 @@ $("#usersBtn").onclick = async () => {
   if (HOSTED) {
     try { me = await api("/api/me"); }                 // a first visit becomes a guest: no sign-in needed
     catch (e) { $("#page").innerHTML = `<div class="empty neg">${esc(e.message)}</div>`; return; }
-    $("#whoBox").hidden = false;
-    $("#who").textContent = me.guest ? "Guest · this browser" : me.email;
+    $("#whoBox").hidden = false; $("#dbipCredit").hidden = false;
+    $("#who").textContent = me.guest ? "Guest" : me.email;
     $("#usersBtn").hidden = !me.admin; $("#addEmail").hidden = !me.guest; $("#signOut").hidden = me.guest;
   }
   schema = await api("/api/schema");

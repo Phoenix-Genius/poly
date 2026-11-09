@@ -55,6 +55,11 @@ FIELDS: dict[str, tuple] = {
     "multiplier": (2.2, "number", None, "Multiplier after loss",
                    "multiply sizing: after a loss the next bet costs this many times more. 2 = $3 -> $6 -> $12. "
                    "At a price of 0.50 a win pays about 1.93x the bet, so 2.1 or more is needed to recover."),
+    "target_steps": (0, "int", None, "Steps to survive",
+                     "Work out the first bet so the budget pays for this many losses in a row, e.g. 7, even if "
+                     "every bet costs the Max price. recover sizing sets the Profit per win, multiply sizing the "
+                     "Starting bet; that setting is then not used. Recalculated from the budget left at each new "
+                     "streak (step 1), so it grows after wins. 0 (or empty) = off."),
     "max_steps": (0, "int", None, "Max losses in a row",
                   "End the ladder after this many losses in a row. 0 = no fixed limit, the budget decides."),
     "on_ladder_end": ("stop", "select", ["stop", "reset"], "When the ladder ends",
@@ -161,6 +166,11 @@ class BotConfig:
             raise ValueError("Max price must be between 0.02 and 0.98")
         if not (0 <= self.min_price < self.max_price):
             raise ValueError("Min price must be 0 or more and below the max price")
+        if not (0 <= self.target_steps <= 30):
+            raise ValueError("Steps to survive must be between 1 and 30, or 0 for off")
+        if self.target_steps and self.max_steps and self.max_steps < self.target_steps:
+            raise ValueError(f"Max losses in a row ({self.max_steps}) is below Steps to survive "
+                             f"({self.target_steps}): raise it or leave it empty")
         if not (0.5 <= self.poll_interval_sec <= 60):
             raise ValueError("Check interval must be between 0.5 and 60 seconds")
 

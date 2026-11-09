@@ -41,6 +41,13 @@ class AppTest(unittest.TestCase):
             ctl.put_settings({"max_price": 1.5})
         with self.assertRaises(ValueError):
             ctl.put_settings({"min_price": 0.6})                # must be below the max price
+        s = ctl.put_settings({"paper_balance_usd": 5000})          # applies at once, no Reset paper needed
+        self.assertEqual((s["balance"], s["start_balance"]), (5000, 5000))
+        with self.assertRaises(ValueError):
+            ctl.put_settings({"target_steps": 8, "max_steps": 5})   # max losses below steps to survive
+        plan = ctl.plan({"target_steps": 4, "price": 0.55})   # max price 0.55
+        self.assertEqual(plan["auto"]["steps"], 4)
+        self.assertGreaterEqual(plan["fits"], 4)
         self.app.delete("eth-15m")
         self.assertNotIn("eth-15m", self.app.controllers)
 

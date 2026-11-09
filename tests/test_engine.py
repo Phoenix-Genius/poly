@@ -99,6 +99,27 @@ class EngineTest(unittest.TestCase):
         bot.tick()
         self.assertIsNotNone(bot.bet)
 
+    def test_steps_to_survive(self):
+        bot = self.make(target_steps=5, budget_usd=300, max_price=0.6)
+        self.play(bot, "down")                          # step 1 lost
+        base = bot.ladder.base
+        self.assertGreater(base, 0)
+        self.play(bot, "down")                          # step 2 lost: same base
+        self.assertEqual(bot.ladder.base, base)
+        self.play(bot, "up")                            # a win: next streak works it out again
+        self.assertEqual((bot.ladder.step, bot.ladder.base), (1, 0.0))
+        bets = read_trades(bot.cfg.trade_log)
+        self.assertAlmostEqual(float(bets[2]["shares"]) - float(bets[2]["cost"]) - float(bets[0]["cost"])
+                               - float(bets[1]["cost"]), base, delta=0.05)   # the win earned the worked-out profit
+
+    def test_steps_to_survive_too_few_funds(self):
+        bot = self.make(target_steps=12, budget_usd=20, max_price=0.6)
+        self.clock.t += 5
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertEqual(bot.halted, "budget")
+        self.assertIn("Steps to survive", bot.halt_message)
+
     def test_state_survives_restart(self):
         bot = self.make()
         self.play(bot, "down")
