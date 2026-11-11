@@ -73,7 +73,10 @@ class Bot:
                                      "start_pnl": self.start_pnl})
 
     def reset(self) -> None:
-        """A fresh ladder at step 1 with zero profit. Refused while a bet is open (its money is in the round)."""
+        """A fresh ladder at step 1 with zero profit. An open bet whose round has a result is settled first (a
+        stopped bot doesn't settle by itself); one still running (or without a result yet) refuses the Reset."""
+        if self.bet:
+            self.settle_ended()
         if self.bet:
             raise ValueError("A bet is open. Wait until its round is paid out, then Reset.")
         self.ladder, self.done_round, self.halted, self.halt_message, self.start_pnl = Ladder(), "", "", "", 0.0
@@ -181,6 +184,16 @@ class Bot:
                                  (now - bet["end"]) // 60)
             return
         self._settle(r.result)
+
+    def settle_ended(self) -> bool:
+        """Settle the open bet now if its round has ended and Polymarket has its result (used while stopped)."""
+        if not self.bet or self.clock() < self.bet["end"]:
+            return False
+        r = self.pm.round(self.bet["slug"])
+        if not r.result:
+            return False
+        self._settle(r.result)
+        return True
 
     def _settle(self, result: str) -> None:
         bet = self.bet

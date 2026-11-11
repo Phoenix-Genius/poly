@@ -4,6 +4,32 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-11
+
+### Max price defaults to 0.55
+- **What:** a new bot's **Max price** is 0.55 (was 0.60).
+- **Why:** the owner's setting change, made before this commit.
+- **How:** `max_price` default in `config.py`; README table.
+- **Tests:** existing tests.
+
+### No bot limit; a blank Bot name gets a random animal
+- **What:** users can make as many bots as they like (before: 5). A new bot with no name, or a bot whose Bot name
+  is cleared and saved, is called a random animal (Fox, Otter, Falcon, …) that none of the user's other bots has.
+- **Why:** the owner: "why bot limit 5? plz make it unlimited. and name random animal, if blank name input."
+- **How:** `MAX_BOTS` defaults to 0 (= no limit) in `hosted.py` and the server's `.env`; `App.animal_name`,
+  used by `App.create` and `Controller.put_settings` (via `Controller.name_for_blank`). A nameless bot's id stays
+  coin-timeframe (`btc-5m`), so links keep working.
+- **Tests:** `test_web`: blank names get different animals (also on save); 7 bots can be made.
+
+### Fixed: Reset stuck with "A bet is open" on a stopped bot
+- **What:** **Reset** on a stopped bot now settles an open bet whose round has already ended and has a result
+  (records the win/loss in History, claims a win unless it was already claimed by hand), then resets. It's still
+  refused while the round is running or Polymarket has no result yet.
+- **Why:** the owner: "i got stuck with this error" (live bot stopped at step 5 with a bet on a finished round; a
+  stopped bot never settles, and Reset refused while the bet was open, so only Start could clear it).
+- **How:** `Bot.settle_ended()`; `Bot.reset()` calls it before refusing.
+- **Tests:** `test_engine`: Reset refused while the round runs / has no result, settles and resets once it has.
+
 ## [0.1.1] - 2026-11-10
 
 ### Fixed: a new Paper balance didn't change the balance

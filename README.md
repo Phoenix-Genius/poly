@@ -140,7 +140,7 @@ use 2.1 or more. recover sizing works it out for you.
 | `side_mode` | alternate | `alternate` Up/Down/Up…, `follow_last` = what the last finished round was, `opposite_last` = against it, `cheaper` = the lower-priced side, `up_only`, `down_only`, `flip_on_loss`, `flip_on_win`, `random`. |
 | `first_side` | up | The first side for alternate/flip modes, and the fallback when the last result isn't known. |
 | `min_price` | 0.45 | Never bet on a side cheaper than this (stops long shots). If it is cheaper, the bot waits; after the entry window it skips the round. 0 = no minimum. |
-| `max_price` | 0.60 | Never pay more per share. If the side costs more, the bot waits; after the entry window it skips the round. |
+| `max_price` | 0.55 | Never pay more per share. If the side costs more, the bot waits; after the entry window it skips the round. |
 | `entry_window_sec` | 0 (= auto) | Bet only this many seconds into a round. Auto = the first third (5m: 100 s, 15m: 5 min, 1h: 20 min, 4h: 80 min, daily: 8 h). |
 | `poll_interval_sec` | 2 | How often the bot checks. |
 
@@ -170,7 +170,7 @@ unit `poly-bot`), behind Caddy, which adds HTTPS for **https://poly.zodypay.com*
   **Keep my bots with email** (optional, a 6-digit code sent with Resend) lets a user reach their bots from any
   browser; a guest who adds an email keeps their bots. Admins sign in with their email. Guests with live bots are
   warned to add an email first: a live bot keeps trading even if its browser's cookies are lost.
-- **Each user has their own bots** (`hosted/users/<id>/profiles/`), up to `MAX_BOTS` (5), and sees only those.
+- **Each user has their own bots** (`hosted/users/<id>/profiles/`), as many as they like (`MAX_BOTS` can set a limit; 0 = none), and sees only those.
 - **Paper bots** work for everyone. **Live bots** use the user's own Polymarket keys, stored **encrypted**
   (`POLY_SECRET_KEY`), and can only be started from a country where Polymarket allows trading. The app checks the
   *user's* address with DB-IP's free country database (`data/dbip-country-lite.csv.gz`; refresh monthly with

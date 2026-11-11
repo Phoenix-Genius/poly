@@ -74,6 +74,21 @@ class AppTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.app.create({"coin": "SOL", "timeframe": "daily"})
 
+    def test_blank_name_gets_an_animal(self):
+        from poly_bot.web import ANIMALS
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        self.app.create({"coin": "BTC", "timeframe": "5m", "name": "  "})
+        names = [c.cfg.display_name for c in self.app.controllers.values()]
+        self.assertTrue(all(n in ANIMALS for n in names), names)
+        self.assertEqual(len(set(names)), 2)                           # not the same animal twice
+        ctl = self.app.get("btc-5m")
+        self.assertIn(ctl.put_settings({"bot_name": ""})["settings"]["bot_name"], ANIMALS)
+
+    def test_no_bot_limit(self):
+        for _ in range(7):
+            self.app.create({"coin": "BTC", "timeframe": "5m"})
+        self.assertEqual(len(self.app.controllers), 7)
+
     def test_reload_keeps_bots(self):
         self.app.create({"coin": "BTC", "timeframe": "5m", "name": "Fast one"})
         for c in self.app.controllers.values():

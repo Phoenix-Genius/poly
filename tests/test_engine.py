@@ -149,6 +149,23 @@ class EngineTest(unittest.TestCase):
         bot.on_start()
         self.assertEqual(bot.ladder.step, 1)
 
+    def test_reset_settles_ended_bet_while_stopped(self):
+        bot = self.make()
+        self.clock.t += 5
+        bot.tick()
+        slug = bot.bet["slug"]
+        with self.assertRaises(ValueError):          # round still running
+            bot.reset()
+        self.clock.t = bot.bet["end"] + 1
+        with self.assertRaises(ValueError):          # ended, no result yet
+            bot.reset()
+        self.pm.results[slug] = "up"
+        bot.reset()                                  # result in: settled, then reset
+        self.assertIsNone(bot.bet)
+        self.assertEqual(bot.ladder.step, 1)
+        self.assertEqual(bot.ladder.pnl, 0)
+        self.assertEqual(len(read_trades(bot.cfg.trade_log)), 1)
+
     def test_ladder_end_reset_mode(self):
         bot = self.make(max_steps=2, on_ladder_end="reset")
         self.play(bot, "down")

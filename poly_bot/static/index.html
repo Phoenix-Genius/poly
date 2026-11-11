@@ -259,7 +259,7 @@
     <h3 style="margin-top:0">New bot</h3>
     <div class="field"><label>Coin</label><select name="coin"></select></div>
     <div class="field"><label>Round length</label><select name="timeframe"></select></div>
-    <div class="field"><label>Name (optional)</label><input name="name" maxlength="40" placeholder="e.g. BTC fast"></div>
+    <div class="field"><label>Name (optional)</label><input name="name" maxlength="40" placeholder="empty = random animal"></div>
     <div class="actions"><button class="btn primary" value="ok">Create</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
   </form>
 </dialog>
@@ -410,7 +410,7 @@ const GROUPS = [
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
 ];
 const WIDE = ["bot_name"];
-const PLACEHOLDER = {bot_name: "e.g. BTC fast", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
+const PLACEHOLDER = {bot_name: "empty = random animal", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
   entry_window_sec: "auto"};
 function fieldHtml(f) {
   let input;

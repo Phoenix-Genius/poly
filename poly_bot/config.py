@@ -19,7 +19,7 @@ SIDE_MODES = ["alternate", "follow_last", "opposite_last", "cheaper", "up_only",
 FIELDS: dict[str, tuple] = {
     # --- basics -----------------------------------------------------------------------------------------
     "bot_name": ("", "text", None, "Bot name",
-                 "Shown in the bot list and the trade log so you can tell bots apart. Empty = coin + timeframe."),
+                 "Shown in the bot list and the trade log so you can tell bots apart. Empty = a random animal name."),
     "network": ("paper", "select", ["paper", "live"], "Network",
                 "paper = simulated bets on the real Polymarket rounds: live order books and real results, "
                 "virtual money, no wallet. live = REAL money: bets with the pUSD in your Polymarket account "
@@ -79,8 +79,8 @@ FIELDS: dict[str, tuple] = {
                   "Never bet on a side cheaper than this per share (0.30 = 30 cents, the market gives that side "
                   "only 30%). Stops long-shot bets late in a round, which lose most of the time. If the side "
                   "is cheaper, the bot waits; if the entry window passes, it skips the round. 0 = no minimum."),
-    "max_price": (0.60, "number", None, "Max price",
-                  "Never pay more than this per share (0.60 = 60 cents, the market gives that side 60%). "
+    "max_price": (0.55, "number", None, "Max price",
+                  "Never pay more than this per share (0.55 = 55 cents, the market gives that side 55%). "
                   "Higher prices win more often but pay less, so the next bets grow faster. If the side costs "
                   "more, the bot waits; if the entry window passes, it skips the round."),
     "entry_window_sec": (0, "int", None, "Entry window (s)",

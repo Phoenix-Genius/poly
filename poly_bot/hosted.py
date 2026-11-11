@@ -16,7 +16,7 @@ Settings, from the environment or the project .env:
     MAIL_FROM        e.g. "Poly Martingale <bot@zodypay.com>" (a domain verified in Resend)
     ADMIN_EMAILS     comma-separated; these users see the user list
     PUBLIC_HOSTS     comma-separated host names the app answers to, e.g. poly.zodypay.com
-    MAX_BOTS         bots per user (default 5)
+    MAX_BOTS         bots per user (default 0 = no limit)
 """
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ class UserApp(App):
 
     def __init__(self, profiles: Path, user: dict, **kw):
         self.user = user
-        self.max_bots = int(os.environ.get("MAX_BOTS", "5"))
+        self.max_bots = int(os.environ.get("MAX_BOTS", "0"))
         super().__init__(profiles, prefix=f"u{user['id']}/", **kw)
 
 

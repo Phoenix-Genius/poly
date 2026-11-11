@@ -10,6 +10,7 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import random
 import re
 import shutil
 import sys
@@ -73,8 +74,20 @@ def bot_logger(bot_id: str, folder: Path) -> tuple[logging.Logger, Lines]:
     return logger, lines
 
 
+ANIMALS = ["Fox", "Wolf", "Bear", "Tiger", "Lion", "Panda", "Koala", "Otter", "Badger", "Falcon", "Eagle", "Hawk",
+           "Owl", "Raven", "Shark", "Dolphin", "Orca", "Whale", "Octopus", "Turtle", "Gecko", "Cobra", "Viper",
+           "Lynx", "Puma", "Jaguar", "Cheetah", "Leopard", "Zebra", "Giraffe", "Rhino", "Hippo", "Bison", "Moose",
+           "Elk", "Yak", "Camel", "Llama", "Alpaca", "Kangaroo", "Wombat", "Hedgehog", "Squirrel", "Beaver",
+           "Raccoon", "Meerkat", "Mongoose", "Ferret", "Weasel", "Penguin", "Pelican", "Flamingo", "Parrot",
+           "Toucan", "Heron", "Swan", "Crane", "Bat", "Mole", "Hare", "Rabbit", "Goat", "Ram", "Stallion", "Mustang",
+           "Gorilla", "Lemur", "Sloth", "Armadillo", "Coyote", "Jackal", "Hyena", "Walrus", "Seal", "Manta",
+           "Barracuda", "Marlin", "Piranha", "Salmon", "Crab", "Lobster", "Scorpion", "Mantis", "Hornet", "Beetle"]
+
+
 class Controller:
     """One bot: its folder, settings, Bot object and thread."""
+
+    name_for_blank = staticmethod(lambda: random.choice(ANIMALS))   # the App swaps in one that avoids taken names
 
     def __init__(self, bot_id: str, folder: Path, pm: Polymarket = PM, log_key: str = ""):
         self.id, self.folder, self.pm = bot_id, folder, pm
@@ -174,6 +187,8 @@ class Controller:
         new_network = str(body.get("network") or self.cfg.network)
         if new_network != self.cfg.network and (self.running or self.bot.bet):
             raise ValueError("Stop the bot and let its open bet pay out before switching between paper and live.")
+        if "bot_name" in body and not str(body["bot_name"] or "").strip():
+            body = {**body, "bot_name": self.name_for_blank()}
         cfg = save_settings(self.config_path, body)
         if (cfg.coin, cfg.timeframe) != (self.cfg.coin, self.cfg.timeframe):
             self.pm.series_id(cfg.coin, cfg.timeframe)            # tell now, not at Start
@@ -334,7 +349,7 @@ def ladder_view(cfg: BotConfig, price: float, budget: float, step: int = 1, lost
 class App:
     """All bots in profiles/."""
 
-    max_bots = 0                      # 0 = no limit (the hosted app sets one per user)
+    max_bots = 0                      # 0 = no limit (MAX_BOTS can set one per user in the hosted app)
 
     def __init__(self, profiles: Path = PROFILES_DIR, pm: Polymarket = PM, prefix: str = ""):
         self.profiles, self.pm, self.prefix = profiles, pm, prefix
@@ -343,6 +358,7 @@ class App:
         for bot_id in bot_ids(self.profiles):
             try:
                 self.controllers[bot_id] = Controller(bot_id, self.profiles / bot_id, pm, prefix + bot_id)
+                self.controllers[bot_id].name_for_blank = self.animal_name
             except (ValueError, OSError) as e:
                 log.warning("Bot %s can't be loaded: %s", bot_id, e)
 
@@ -355,6 +371,12 @@ class App:
         return {"bots": [c.summary(full=True) for c in self.controllers.values()], "version": __version__,
                 "started": STARTED}
 
+    def animal_name(self) -> str:
+        """A random animal no other bot of this user is called (a blank Bot name gets one)."""
+        taken = {c.cfg.display_name.lower() for c in self.controllers.values()}
+        free = [a for a in ANIMALS if a.lower() not in taken]
+        return random.choice(free) if free else f"{random.choice(ANIMALS)} {random.randint(2, 999)}"
+
     def create(self, body: dict) -> dict:
         if self.max_bots and len(self.controllers) >= self.max_bots:
             raise ValueError(f"You can have up to {self.max_bots} bots. Delete one to make another.")
@@ -363,13 +385,15 @@ class App:
         if coin not in COINS or tf not in TIMEFRAMES:
             raise ValueError("Pick a coin and a round length")
         self.pm.series_id(coin, tf)          # refuse a coin without that timeframe
-        name = str(body.get("name") or "").strip()[:40]
-        bot_id = free_bot_id(slug(name or f"{coin}-{tf}"), self.profiles, self.controllers)
+        name = str(body.get("name") or "").strip()[:40] or self.animal_name()
+        bot_id = free_bot_id(slug(str(body.get("name") or "").strip() or f"{coin}-{tf}"), self.profiles,
+                             self.controllers)
         folder = self.profiles / bot_id
         folder.mkdir(parents=True)
         cfg = BotConfig(folder, coin=coin, timeframe=tf, bot_name=name)
         write_json(folder / "config.json", cfg.settings())
         self.controllers[bot_id] = Controller(bot_id, folder, self.pm, self.prefix + bot_id)
+        self.controllers[bot_id].name_for_blank = self.animal_name
         log.info("New bot %s%s (%s %s)", self.prefix, bot_id, coin, tf)
         return {"id": bot_id, **self.list()}
 
