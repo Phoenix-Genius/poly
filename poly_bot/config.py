@@ -38,7 +38,8 @@ FIELDS: dict[str, tuple] = {
                    "the next bet costs more than what's left, the ladder ends. Empty (or 0) = the whole balance "
                    "(paper or live)."),
     "stop_profit_usd": (0.0, "number", None, "Until earn ($)",
-                        "Stop once the bot has earned this much since you pressed Start, e.g. 20. "
+                        "Stop once Profit since Reset reaches this, e.g. 20 (Stop/Start and app restarts don't change it; "
+                        "Reset starts counting again). "
                         "Empty (or 0) = off: the bot runs until you stop it."),
     # --- sizing -----------------------------------------------------------------------------------------
     "sizing": ("recover", "select", ["recover", "multiply"], "Bet sizing",

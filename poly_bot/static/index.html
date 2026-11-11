@@ -585,7 +585,7 @@ function render() {
     <div class="tiles">
       <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
-      <div class="tile" style="--tone:#db2777"><div class="k">🎯 Since Start${s.settings.stop_profit_usd > 0 ? " / " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num ${tone(s.earned_since_start)}">${money(s.earned_since_start, true)}</div></div>
+      <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${s.ladder.fits}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
       <div class="tile"><div class="k">🧮 Budget left</div><div class="v num">${money(s.budget_left)}</div></div>

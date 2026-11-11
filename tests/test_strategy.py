@@ -155,3 +155,38 @@ class StepsToSurviveTest(unittest.TestCase):
         self.assertLess(streak_sizing(cfg, 1, base, 150)[1], base)        # a new streak with less money
         self.assertIs(streak_sizing(BotConfig("."), 1, 0.0, 300)[0].__class__, BotConfig)   # off
 
+
+
+class BookSizingTest(unittest.TestCase):
+    """A big recover bet climbs a thin book: sized at the best ask alone, its win pays back less than the streak."""
+    # the 2026-11-11 paper bet: step 9, the streak lost $3,843.78, best ask 0.46, filled at 0.508 on average
+    ASKS = [(0.46, 2000), (0.48, 1500), (0.50, 1500), (0.52, 1500), (0.54, 2000), (0.55, 3000)]
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.cfg = BotConfig(Path(tempfile.mkdtemp()), sizing="recover", base_profit_usd=10)
+        self.lost = 3843.78
+
+    def test_best_ask_sizing_falls_short(self):
+        from poly_bot.strategy import shares_for, walk_asks
+        n = shares_for(self.cfg, 9, self.lost, 0.46)
+        fill = walk_asks(self.ASKS, n, 0.55)
+        self.assertLess(n - fill.cost - self.lost, 0)          # the old way: the win doesn't pay the streak back
+
+    def test_book_sizing_pays_the_streak_back(self):
+        from poly_bot.strategy import shares_for_book, walk_asks
+        n = shares_for_book(self.cfg, 9, self.lost, self.ASKS, 0.55)
+        fill = walk_asks(self.ASKS, n, 0.55)
+        self.assertGreaterEqual(n - fill.cost - self.lost, 10 - 1e-6)     # streak back plus the Profit per win
+        self.assertLess(walk_asks(self.ASKS, n - 0.02, 0.55).shares - walk_asks(self.ASKS, n - 0.02, 0.55).cost
+                        - self.lost, 10)                                   # and not more shares than needed
+
+    def test_thin_book_returns_none(self):
+        from poly_bot.strategy import shares_for_book
+        self.assertIsNone(shares_for_book(self.cfg, 9, self.lost, [(0.46, 500), (0.50, 500)], 0.55))
+        self.assertIsNone(shares_for_book(self.cfg, 1, 0, [(0.60, 5000)], 0.55))    # nothing up to Max price
+
+    def test_deep_book_same_as_before(self):
+        from poly_bot.strategy import shares_for, shares_for_book
+        self.assertEqual(shares_for_book(self.cfg, 3, 50, [(0.5, 1e6)], 0.55), shares_for(self.cfg, 3, 50, 0.5))

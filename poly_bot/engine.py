@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from .config import BotConfig, write_json
 from .markets import MarketError, Polymarket
-from .strategy import Ladder, choose_side, cost_of, entry_window, shares_for, streak_sizing
+from .strategy import Ladder, choose_side, cost_of, entry_window, shares_for_book, streak_sizing, walk_asks
 from .trades import append_trade
 
 SETTLE_CHECK_SEC = 10          # how often to ask whether an ended round has resolved
@@ -39,7 +39,6 @@ class Bot:
         self.done_round = ""           # the round already bet on (one bet per round)
         self.halted = ""               # why the bot stopped by itself: "ladder" (needs Reset) or "target"
         self.halt_message = ""
-        self.start_pnl = 0.0           # ladder.pnl when Start was pressed (for Until earn)
         self.phase, self.message = "idle", ""
         self.live: dict = {}           # the open bet's live price, for the page
         self._next_settle_check = 0.0
@@ -65,12 +64,10 @@ class Bot:
         self.done_round = d.get("done_round", "")
         self.halted = d.get("halted", "")
         self.halt_message = d.get("halt_message", "")
-        self.start_pnl = float(d.get("start_pnl", 0.0))
 
     def save(self) -> None:
         write_json(self.state_path, {"ladder": self.ladder.to_dict(), "bet": self.bet, "done_round": self.done_round,
-                                     "halted": self.halted, "halt_message": self.halt_message,
-                                     "start_pnl": self.start_pnl})
+                                     "halted": self.halted, "halt_message": self.halt_message})
 
     def reset(self) -> None:
         """A fresh ladder at step 1 with zero profit. An open bet whose round has a result is settled first (a
@@ -79,15 +76,18 @@ class Bot:
             self.settle_ended()
         if self.bet:
             raise ValueError("A bet is open. Wait until its round is paid out, then Reset.")
-        self.ladder, self.done_round, self.halted, self.halt_message, self.start_pnl = Ladder(), "", "", "", 0.0
+        self.ladder, self.done_round, self.halted, self.halt_message = Ladder(), "", "", ""
         self.save()
         self.log.info("Reset: fresh ladder at step 1")
 
     def on_start(self) -> None:
         if self.halted == "ladder":
             raise ValueError(f"{self.halt_message} Press Reset to start a new ladder.")
+        if self.target_reached():
+            raise ValueError(f"Already earned ${self.ladder.pnl:.2f} since Reset, the Until earn target of "
+                             f"${self.cfg.stop_profit_usd:.2f}. Press Reset to start counting again, or raise "
+                             f"Until earn.")
         self.halted, self.halt_message = "", ""
-        self.start_pnl = self.ladder.pnl
         self.save()
 
     # --- numbers -----------------------------------------------------------------------------------------
@@ -109,8 +109,12 @@ class Bot:
                           base, self.budget_left(), cfg.max_price)
         return sizing
 
-    def earned_since_start(self) -> float:
-        return self.ladder.pnl - self.start_pnl
+    def target_reached(self) -> bool:
+        """Until earn counts the profit since Reset (ladder.pnl), so a restart or Stop/Start doesn't move it."""
+        return self.cfg.stop_profit_usd > 0 and self.ladder.pnl >= self.cfg.stop_profit_usd - 1e-9
+
+    def until_earn_left(self) -> float:
+        return max(0.0, self.cfg.stop_profit_usd - self.ladder.pnl) if self.cfg.stop_profit_usd > 0 else 0.0
 
     # --- loop --------------------------------------------------------------------------------------------
     def run(self, stop: threading.Event) -> None:
@@ -218,8 +222,9 @@ class Bot:
                       "WIN " if won else "LOSS", bet["title"], bet["side"].upper(), bet["price"], result.upper(),
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
                       abs(self.ladder.pnl))
-        if self.cfg.stop_profit_usd > 0 and self.earned_since_start() >= self.cfg.stop_profit_usd - 1e-9:
-            self._halt("target", f"Earned ${self.earned_since_start():.2f} since Start, the Until earn target.")
+        if self.target_reached():
+            self._halt("target", f"Earned ${self.ladder.pnl:.2f} since Reset, the Until earn target. Press Reset "
+                                 f"to start counting again, or raise Until earn.")
             return
         if not won and self.cfg.max_steps and self.ladder.step > self.cfg.max_steps:
             self._ladder_end(f"{self.cfg.max_steps} losses in a row (Max losses in a row).")
@@ -258,9 +263,18 @@ class Bot:
             return self._halt("budget", f"${self.budget_left():.2f} left can't pay for {cfg.target_steps} bets in "
                                         f"a row (Steps to survive), even at 5 shares each: lower Steps to survive "
                                         f"or add money, then Start again.")
-        shares = max(shares_for(sizing, self.ladder.step, self.ladder.streak_lost, price, cur.fee_rate,
-                                cur.fee_exponent), cur.min_size)
-        est = cost_of(shares, price, cur.fee_rate, cur.fee_exponent)
+        # sized on the order book, not the best ask alone: a big bet climbs the asks, and a win sized at the best
+        # price would then win back less than the streak lost
+        asks = self.pm.book(cur.token(side))["asks"]
+        shares = shares_for_book(sizing, self.ladder.step, self.ladder.streak_lost, asks, cfg.max_price,
+                                 cur.fee_rate, cur.fee_exponent)
+        if shares is None:
+            return self._wait(f"Not enough {side.upper()} shares for sale up to {cfg.max_price:.2f} for a win to "
+                              f"pay back the streak; retrying (window ends in {fmt_secs(window - elapsed)})",
+                              key=f"thin:{cur.slug}")
+        shares = max(shares, cur.min_size)
+        plan = walk_asks(asks, shares, cfg.max_price, cur.fee_rate, cur.fee_exponent)
+        est = plan.cost if plan else cost_of(shares, price, cur.fee_rate, cur.fee_exponent)
         if est > self.budget_left() + 1e-9:
             return self._ladder_end(f"the step {self.ladder.step} bet costs ${est:.2f} but only "
                                     f"${self.budget_left():.2f} of the budget is left.")

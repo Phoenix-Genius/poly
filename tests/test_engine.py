@@ -181,8 +181,21 @@ class EngineTest(unittest.TestCase):
         self.assertFalse(bot.halted)
         self.play(bot, "up")
         self.assertEqual(bot.halted, "target")
-        bot.on_start()                     # Start again is allowed after the target
-        self.assertEqual(bot.earned_since_start(), 0)
+        with self.assertRaises(ValueError):
+            bot.on_start()                 # counted since Reset: Start again would stop at once
+        bot.cfg.stop_profit_usd = 10       # a higher target: Start is allowed, the profit so far counts
+        bot.on_start()
+        self.assertAlmostEqual(bot.until_earn_left(), 10 - bot.ladder.pnl)
+        bot.reset()
+        self.assertEqual(bot.until_earn_left(), 10)
+
+    def test_until_earn_counts_since_reset_not_start(self):
+        bot = self.make(stop_profit_usd=4)
+        bot.on_start()
+        self.play(bot, "up")
+        bot.on_start()                     # Stop/Start (or an app restart) doesn't restart the count
+        self.play(bot, "up")
+        self.assertEqual(bot.halted, "target")
 
     def test_run_loop_stops(self):
         bot = self.make(poll_interval_sec=0.5)

@@ -129,7 +129,7 @@ use 2.1 or more. recover sizing works it out for you.
 | `coin` | BTC | BTC, ETH, SOL, XRP, DOGE, BNB, HYPE. |
 | `timeframe` | 5m | 5m, 15m, 1h, 4h or daily (see the table at the top). |
 | `budget_usd` | 0 (= all) | How much the bot may lose. Profits are added, losses taken off. When the next bet costs more than what's left, the ladder ends. |
-| `stop_profit_usd` | 0 (= off) | **Until earn**: stop once the bot has earned this much since Start. |
+| `stop_profit_usd` | 0 (= off) | **Until earn**: stop once Profit since Reset reaches this (Reset starts counting again). |
 | `sizing` | recover | `recover` = one win pays back the streak + Profit per win. `multiply` = Starting bet × Multiplier^(step−1). |
 | `base_profit_usd` | 2.5 | recover: what each winning streak earns after fees. |
 | `start_usd` | 3 | multiply: the first bet's cost, fee included. |

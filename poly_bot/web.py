@@ -306,7 +306,7 @@ class Controller:
             "unclaimed": round(b.client.unclaimed(), 2) if hasattr(b.client, "unclaimed") else 0.0,
             "start_balance": round(float(b.client.data.get("start_balance", 0)), 2),
             "budget_left": round(b.budget_left(), 2) if bal is not None else None,
-            "earned_since_start": round(b.earned_since_start(), 2),
+            "until_earn_left": round(b.until_earn_left(), 2),
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",

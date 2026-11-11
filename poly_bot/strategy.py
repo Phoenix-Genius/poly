@@ -225,6 +225,40 @@ def walk_asks(asks: Sequence[tuple], shares: float, max_price: float, rate: floa
     return Fill(shares, paid / shares, round(paid + fee, 6), round(fee, 6), used)
 
 
+def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], max_price: float,
+                    rate: float = DEFAULT_FEE_RATE, exponent: float = 1.0) -> Optional[float]:
+    """Like shares_for, but priced on the real order book: a big bet climbs the asks (slippage), so a recover bet
+    sized at the best price alone wins back less than the streak lost. Returns the fewest shares (to the cent)
+    whose win, after the cost of walking the asks up to max_price (fees included), leaves the Profit per win plus
+    the streak's loss; None when the book up to max_price is too thin for that. multiply sizing has no target,
+    so it's sized at the best ask as before."""
+    asks = sorted(a for a in asks if a[0] <= max_price + 1e-9)
+    if not asks:
+        return None
+    if cfg.sizing != "recover":
+        return shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)
+    target = cfg.base_profit_usd + streak_lost
+
+    def net(n: float) -> Optional[float]:          # what a win of n shares earns over their cost
+        f = walk_asks(asks, n, max_price, rate, exponent)
+        return None if f is None else n - f.cost
+
+    lo = shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)   # enough if the best ask had them all
+    if (net(lo) or -1) >= target - 1e-9:
+        return lo
+    hi = floor2(sum(size for _, size in asks))
+    if hi <= lo or (net(hi) or -1) < target - 1e-9:
+        return None
+    for _ in range(60):                             # net() rises with n: bisect to the cent
+        if hi - lo <= 0.01 + 1e-9:
+            break
+        mid = ceil2((lo + hi) / 2)
+        if mid >= hi:
+            break
+        lo, hi = (mid, hi) if (net(mid) or -1) < target - 1e-9 else (lo, mid)
+    return hi
+
+
 def streak_sizing(cfg, step: int, base: float, budget: float):
     """(sizing, base) for a bet at `step` of a streak. Without Steps to survive: (cfg, 0). With it, a new streak
     (step 1, or no base yet) works out its first bet from `budget` at the Max price; later steps keep `base`.

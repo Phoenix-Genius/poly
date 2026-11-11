@@ -4,6 +4,32 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-11
+
+### Until earn counts since Reset, not since Start
+- **What:** **Until earn** now stops the bot when **Profit since Reset** reaches it. Stop/Start and app restarts
+  no longer restart the count; Reset does. Once reached, Start is refused until you Reset or raise Until earn. The
+  "Since Start" tile is now **Until earn**: what's still to go, "✅ reached", or "off".
+- **Why:** the owner: "until earn should calculate after reset." (Their live bot stopped at "Earned $103.22 since
+  Start" while Profit since Reset was $77.24: an app restart had started the count again from a lower point.)
+- **How:** `Bot.target_reached` / `Bot.until_earn_left` use `ladder.pnl`; `start_pnl` is gone (old state files
+  still load); status sends `until_earn_left` instead of `earned_since_start`.
+- **Tests:** `test_engine`: the count survives Start; Start refused after the target until it's raised or Reset.
+
+### Fixed: a win after a long streak didn't pay the streak back
+- **What:** recover sizing now works out the shares from the real order book instead of the best price alone. A
+  big bet climbs the asks (slippage); the bot now buys enough shares that the win still pays back the whole streak
+  plus the Profit per win. If the book up to Max price is too thin for that, the bot waits and retries in the
+  entry window ("Not enough … for a win to pay back the streak") instead of betting too little.
+- **Why:** the owner: "after long streak profit goes minus." A paper bot's step-9 bet had to win back $3,843.78 +
+  $10; sized at the best ask 0.46 (7,374.10 shares) it filled at 0.508 on average ($353.31 slippage), so the win
+  paid +$3,500.00 and the bot went back to step 1 at −$238.17.
+- **How:** `strategy.shares_for_book` (bisects the share count on `walk_asks`); `Bot._enter` fetches the side's
+  book, sizes with it, and checks the budget against the walked cost. multiply sizing is unchanged (no target).
+  The ladder table and Steps to survive still assume no slippage.
+- **Tests:** `test_strategy.BookSizingTest`: the old sizing falls short on that book, the new one pays the streak
+  back with no extra shares, a too-thin book gives None, a deep book sizes as before.
+
 ## [0.1.3] - 2026-11-11
 
 ### Price ± (cents): a slider for Min and Max price
