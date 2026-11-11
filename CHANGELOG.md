@@ -4,6 +4,26 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-11
+
+### Price ± (cents): a slider for Min and Max price
+- **What:** a **Price ± (cents)** slider (1–25¢) in Settings → Entry sets Min and Max price evenly around 0.50:
+  ±5¢ = 0.45–0.55, ±10¢ = 0.40–0.60; next to it the range it sets. Min/Max price stay and can still be set one by
+  one; the slider then says "custom · 0.42–0.60".
+- **Why:** the owner: "set min and max price by input 0.5 or 1 then 4.5-5.5 or 4-6 like this"; asked, they chose
+  cents and keeping both boxes, linked; then "it should be range slider".
+- **How:** page-only (`spreadFromPrices` / `pricesFromSpread` in `static/index.html`); nothing new is saved, only
+  `min_price` / `max_price`. The form only sends named inputs.
+- **Tests:** checked in headless Chromium: 5 → 0.45–0.55, sliding to 10 → 0.40–0.60, Min 0.42 → custom; the
+  slider isn't sent with the settings.
+
+### Large amounts shown with k and M, like the hyperliquid bot
+- **What:** dollar amounts and share counts are exact up to 9,999.99 (now with thousands commas: $4,944.85) and
+  short from 10,000: $12.3k, $1.44M. Hovering a short amount shows the exact one. Confirm dialogs stay exact.
+- **Why:** the owner: "about large numbers, use k and m as like hl".
+- **How:** `money` / `moneyFull` / `shortNum` / `sharesTxt` in `static/index.html` (same rule as hyperliquid's `usdS`).
+- **Tests:** checked by hand (formatter outputs; the page script parses).
+
 ## [0.1.2] - 2026-11-11
 
 ### Max price defaults to 0.55

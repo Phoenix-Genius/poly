@@ -220,6 +220,9 @@
   .credit { font-size: 11px; color: var(--muted); }
   .warn { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); padding: 8px 10px; margin: 8px 0; font-size: 13px; }
   #usersDlg { width: min(760px, 96vw); }
+.spread-row { display: flex; align-items: center; gap: 10px; }
+.spread-row input[type=range] { flex: 1; width: auto; padding: 0; accent-color: var(--accent); }
+.spread-row b { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -283,7 +286,16 @@
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const money = (v, sign = false) => v == null || v === "" ? "–" : (sign && +v > 0 ? "+" : (+v < 0 ? "−" : "")) + "$" + Math.abs(+v).toFixed(2);
+// amounts like the hyperliquid bot: exact up to $9,999.99, short from $10,000 ($12.1k, $1.44M; the exact amount in
+// the tooltip). moneyFull is always exact (confirm dialogs).
+const shortNum = (a) => a < 1e4 ? a.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+  : a < 1e6 ? (a / 1e3).toFixed(1) + "k" : (a / 1e6).toFixed(2) + "M";
+const sgnOf = (v, sign) => sign && +v > 0 ? "+" : (+v < 0 ? "−" : "");
+const moneyFull = (v, sign = false) => v == null || v === "" ? "–" : sgnOf(v, sign) + "$" +
+  Math.abs(+v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const money = (v, sign = false) => v == null || v === "" ? "–" : Math.abs(+v) < 1e4 ? moneyFull(v, sign)
+  : `<span title="${moneyFull(v, sign)}">${sgnOf(v, sign)}$${shortNum(Math.abs(+v))}</span>`;
+const sharesTxt = (v) => Math.abs(+v) < 1e4 ? shortNum(Math.abs(+v)) : `<span title="${(+v).toFixed(2)}">${shortNum(Math.abs(+v))}</span>`;
 const tone = v => +v > 0 ? "pos" : (+v < 0 ? "neg" : "");
 const sideHtml = s => s ? `<span class="side-${s}">${s === "up" ? "📈 Up" : "📉 Down"}</span>` : "–";
 const secs = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : Math.floor(s / 3600) + "h " + String(Math.floor(s % 3600 / 60)).padStart(2, "0") + "m"; };
@@ -412,12 +424,34 @@ const GROUPS = [
 const WIDE = ["bot_name"];
 const PLACEHOLDER = {bot_name: "empty = random animal", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
   entry_window_sec: "auto"};
+const SPREAD_HELP = "Slide to set Min and Max price around 0.50 in one go: ±5¢ = 0.45–0.55, ±10¢ = 0.40–0.60. " +
+  "You can still set Min and Max one by one; the slider then says custom.";
+// the Price ± box: fills Min/Max price, and shows their spread when they're even around 0.50
+function spreadFromPrices() {
+  const lo = parseFloat($('#form [name="min_price"]')?.value), hi = parseFloat($('#form [name="max_price"]')?.value);
+  const box = $("#spread");
+  if (!box) return;
+  const even = isFinite(lo) && isFinite(hi) && hi > 0.5 && Math.abs(lo + hi - 1) < 1e-6;
+  if (isFinite(lo) && isFinite(hi)) box.value = Math.round((hi - lo) * 50);
+  $("#spreadVal").textContent = even ? `±${+((hi - 0.5) * 100).toFixed(2)}¢ · ${lo.toFixed(2)}–${hi.toFixed(2)}`
+    : isFinite(lo) && isFinite(hi) ? `custom · ${lo.toFixed(2)}–${hi.toFixed(2)}` : "";
+}
+function pricesFromSpread() {
+  const c = parseFloat($("#spread").value);
+  if (!(c > 0 && c < 50)) return;
+  $('#form [name="min_price"]').value = +(0.5 - c / 100).toFixed(4);
+  $('#form [name="max_price"]').value = +(0.5 + c / 100).toFixed(4);
+  spreadFromPrices();
+}
 function fieldHtml(f) {
   let input;
   if (f.type === "select") input = `<select name="${f.key}">${f.options.map(o => `<option value="${o}">${o}</option>`).join("")}</select>`;
   else if (f.type === "bool") input = `<input type="checkbox" name="${f.key}" style="width:auto">`;
   else input = `<input name="${f.key}" ${f.type === "text" ? "" : 'inputmode="decimal"'} autocomplete="off" placeholder="${PLACEHOLDER[f.key] || ""}">`;
-  return `<div class="field ${WIDE.includes(f.key) ? "wide" : ""}" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
+  const spread = f.key !== "min_price" ? "" : `<div class="field wide" data-key="price_spread"><label title="${esc(SPREAD_HELP)}">Price ± (cents)</label>` +
+    `<div class="spread-row"><input id="spread" type="range" min="1" max="25" step="1" value="5"><b id="spreadVal"></b></div>` +
+    `<div class="help">${esc(SPREAD_HELP)}</div></div>`;
+  return spread + `<div class="field ${WIDE.includes(f.key) ? "wide" : ""}" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
 }
 function buildForm() {
   const form = $("#form");
@@ -429,7 +463,10 @@ function buildForm() {
     return `<div class="card tone-${g.tone}"><div class="card-head"><span class="card-ico">${g.icon}</span><span class="card-title">${g.title}</span></div>
       <div class="card-body">${keys.map(k => fieldHtml(byKey[k])).join("")}</div></div>`;
   }).join("");
-  for (const el of form.querySelectorAll("input,select")) el.addEventListener("input", () => { setDirty(true); showFields(); schedulePreview(); });
+  for (const el of form.querySelectorAll("input,select")) el.addEventListener("input", () => {
+    if (el.id === "spread") pricesFromSpread(); else if (el.name === "min_price" || el.name === "max_price") spreadFromPrices();
+    setDirty(true); showFields(); schedulePreview();
+  });
   setDirty(false);
 }
 function setDirty(d) {
@@ -444,11 +481,12 @@ function fillForm(settings) {
     if (!el) continue;
     if (el.type === "checkbox") el.checked = !!v; else el.value = v === 0 && ZERO_IS_OFF.includes(k) ? "" : v;
   }
+  spreadFromPrices();
   showFields();
 }
 function formValues() {
   const out = {};
-  for (const el of document.querySelectorAll("#form input, #form select")) out[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  for (const el of document.querySelectorAll("#form input[name], #form select[name]")) out[el.name] = el.type === "checkbox" ? el.checked : el.value;
   return out;
 }
 function showFields() {
@@ -613,7 +651,7 @@ function betPanel(s) {
     <div class="bet">
       <div><div class="k">Side</div><div class="v">${sideHtml(b.side)}</div></div>
       <div><div class="k">Price</div><div class="v num">${(+b.price).toFixed(3)}</div></div>
-      <div><div class="k">Shares</div><div class="v num">${(+b.shares).toFixed(2)}</div></div>
+      <div><div class="k">Shares</div><div class="v num">${sharesTxt(b.shares)}</div></div>
       <div><div class="k">Cost (fee ${money(b.fee)})</div><div class="v num">${money(b.cost)}</div></div>
       <div><div class="k">A win pays</div><div class="v num pos">${money(b.shares)} <small>(${money(b.win_profit, true)})</small></div></div>
       <div><div class="k">${ended ? "Round ended" : "Ends in"}</div><div class="v num">${ended ? "⏳ result soon" : secs(b.ends_in)}</div></div>
@@ -635,7 +673,7 @@ function renderLadder() {
     ? `<p class="neg" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: the budget can't pay for ${a.steps} bets in a row even at 5 shares each.</p>`
     : `<p class="muted" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: ${a.label} <b>${money(a.base)}</b> for this streak, so ${a.steps} losses in a row fit even if every bet costs ${a.price.toFixed(2)}.</p>`;
   el.innerHTML = autoNote + `${view.step > 1 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit. A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
-    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${r.shares.toFixed(2)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
+    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
   </table>`;
 }
 function historyTable(rows) {
@@ -653,7 +691,7 @@ function historyTable(rows) {
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
     ${rows.map(t => `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
       <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
-      <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${(+t.shares).toFixed(2)}</td><td class="num">${money(t.cost)}</td>
+      <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
       <td class="l">${t.side === t.result ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
       <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td>
@@ -661,9 +699,9 @@ function historyTable(rows) {
 }
 async function doAct(a) {
   const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset goes back to 0 (the history is kept).",
-    paper_reset: `Reset the paper account to ${money(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
+    paper_reset: `Reset the paper account to ${moneyFull(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
     delete: `Delete bot "${status.name}" with its settings, history and log?`,
-    start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${status.settings.budget_usd > 0 ? money(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + money(status.balance) + " can be lost"}\nFirst bet: about ${money(status.ladder.rows[status.step - 1]?.cost)}` : ""};
+    start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${status.settings.budget_usd > 0 ? moneyFull(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + moneyFull(status.balance) + " can be lost"}\nFirst bet: about ${moneyFull(status.ladder.rows[status.step - 1]?.cost)}` : ""};
   if (a === "delete") {
     if (!confirm(confirms.delete)) return;
     try { const d = await api(`/api/bots/${current}/delete`, {}); bots = d.bots; current = bots[0]?.id || ""; status = null; renderBots(); buildForm(); refresh(); }
