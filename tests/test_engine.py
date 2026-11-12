@@ -189,6 +189,20 @@ class EngineTest(unittest.TestCase):
         bot.reset()
         self.assertEqual(bot.until_earn_left(), 10)
 
+    def test_recover_over_two_wins(self):
+        bot = self.make(recover_wins=2)
+        self.play(bot, "down")
+        self.play(bot, "down")
+        lost = bot.ladder.streak_lost
+        self.play(bot, "up")                                  # half back: still owed, back at step 1
+        self.assertEqual(bot.ladder.step, 1)
+        self.assertAlmostEqual(bot.ladder.streak_lost, lost / 2, places=6)
+        self.assertEqual(bot.ladder.wins_left, 1)
+        self.assertLess(bot.ladder.pnl, 0)
+        self.play(bot, "up")                                  # the second win clears it, both wins' profit kept
+        self.assertEqual(bot.ladder.streak_lost, 0)
+        self.assertGreater(bot.ladder.pnl, 2 * 2.5 - 0.2)
+
     def test_until_earn_counts_since_reset_not_start(self):
         bot = self.make(stop_profit_usd=4)
         bot.on_start()

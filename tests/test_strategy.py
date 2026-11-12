@@ -190,3 +190,51 @@ class BookSizingTest(unittest.TestCase):
     def test_deep_book_same_as_before(self):
         from poly_bot.strategy import shares_for, shares_for_book
         self.assertEqual(shares_for_book(self.cfg, 3, 50, [(0.5, 1e6)], 0.55), shares_for(self.cfg, 3, 50, 0.5))
+
+
+class RecoverOverWinsTest(unittest.TestCase):
+    def cfg(self, **kw):
+        import tempfile
+        from pathlib import Path
+        return BotConfig(Path(tempfile.mkdtemp()), **{"sizing": "recover", "base_profit_usd": 10, **kw})
+
+    def test_record_carries_the_debt(self):
+        lad = Ladder()
+        lad.record("up", False, -10, 2)
+        lad.record("down", False, -20, 2)
+        self.assertEqual((lad.step, lad.streak_lost, lad.wins_left), (3, 30, 0))
+        lad.record("up", True, 25, 2)                       # half of the 30 back (+ profit)
+        self.assertEqual((lad.step, lad.streak_lost, lad.wins_left), (1, 15, 1))
+        lad.record("down", False, -12, 2)                   # a loss: the 27 is spread over 2 wins again
+        self.assertEqual((lad.step, lad.streak_lost, lad.wins_left), (2, 27, 0))
+        lad.record("up", True, 23.5, 2)
+        lad.record("down", True, 23.5, 2)
+        self.assertEqual((lad.step, lad.streak_lost, lad.wins_left, lad.base), (1, 0, 0, 0))
+
+    def test_one_win_is_the_old_behaviour(self):
+        lad = Ladder()
+        lad.record("up", False, -10)
+        lad.record("up", True, 12)
+        self.assertEqual((lad.step, lad.streak_lost), (1, 0))
+
+    def test_ladder_grows_slower(self):
+        one = build_ladder(self.cfg(), 0.5, 1e9, max_rows=10)
+        two = build_ladder(self.cfg(recover_wins=2), 0.5, 1e9, max_rows=10)
+        three = build_ladder(self.cfg(recover_wins=3), 0.5, 1e9, max_rows=10)
+        total = lambda rows: sum(r.cost for r in rows)
+        self.assertGreater(total(one), 9 * total(two))       # ~$14.6k vs ~$1.4k for 10 losses
+        self.assertGreater(total(two), 2 * total(three))
+        for r in two:                                        # a win still earns the Profit per win
+            self.assertAlmostEqual(r.win_profit, 10, delta=0.05)
+        self.assertAlmostEqual(two[3].left_after_win, two[2].lost_total / 2, delta=0.01)
+        self.assertEqual(one[3].left_after_win, 0)
+
+    def test_steps_to_survive_fits_a_bigger_bet(self):
+        self.assertGreater(base_for_steps(self.cfg(recover_wins=2), 8, 0.55, 5000),
+                           3 * base_for_steps(self.cfg(), 8, 0.55, 5000))
+
+    def test_book_sizing_uses_the_part(self):
+        from poly_bot.strategy import shares_for, shares_for_book
+        c = self.cfg(recover_wins=2)
+        self.assertEqual(shares_for_book(c, 3, 100, [(0.5, 1e6)], 0.55), shares_for(c, 3, 100, 0.5))
+        self.assertEqual(shares_for(c, 1, 100, 0.5, wins_left=1), shares_for(self.cfg(), 1, 100, 0.5))

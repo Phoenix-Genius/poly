@@ -7,6 +7,8 @@ share pays $1; if it loses, the shares are worth $0. So:
     win:  profit = shares - cost          loss: profit = -cost
 
 The ladder: after a loss the next bet is bigger so that one win pays back the streak; any win goes back to step 1.
+With Recover over N wins (recover sizing), a win pays back 1/N of what the streak still owes, so bets grow more
+slowly; the rest is carried to the next bets until N wins clear it (a loss spreads the debt over N wins again).
 """
 from __future__ import annotations
 
@@ -46,7 +48,7 @@ def entry_window(timeframe: str, setting: int) -> float:
 class Ladder:
     """Where the martingale stands. Saved in state-<network>.json."""
     step: int = 1                  # 1 = first bet of a streak
-    streak_lost: float = 0.0       # USDC lost in the current losing streak (fees included)
+    streak_lost: float = 0.0       # USDC the streak still has to win back (fees included)
     pnl: float = 0.0               # realised profit since the last Reset
     wins: int = 0
     losses: int = 0
@@ -54,21 +56,29 @@ class Ladder:
     last_won: Optional[bool] = None
     rounds_bet: int = 0            # bets placed since Reset (for the alternate side mode)
     base: float = 0.0              # Steps to survive: this streak's Profit per win / Starting bet (0 = settings')
+    wins_left: int = 0             # Recover over N wins: wins still needed to clear streak_lost (0 = N)
 
-    def record(self, side: str, won: bool, profit: float) -> None:
+    def record(self, side: str, won: bool, profit: float, recover_wins: int = 1) -> None:
         self.pnl += profit
         self.last_side, self.last_won = side, won
         if won:
             self.wins += 1
-            self.step, self.streak_lost, self.base = 1, 0.0, 0.0
+            self.step = 1
+            left = self.wins_left or recover_wins
+            if left <= 1 or self.streak_lost <= 0:
+                self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
+            else:                                 # this win paid back 1/left of the debt; the rest is carried
+                self.streak_lost -= self.streak_lost / left
+                self.wins_left = left - 1
         else:
             self.losses += 1
             self.step += 1
             self.streak_lost += -profit
+            self.wins_left = 0                    # the bigger debt is spread over N wins again
 
     def restart(self) -> None:
         """Accept the streak's loss and start again at step 1 (pnl and counts stay)."""
-        self.step, self.streak_lost, self.base = 1, 0.0, 0.0
+        self.step, self.streak_lost, self.base, self.wins_left = 1, 0.0, 0.0, 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,13 +88,18 @@ class Ladder:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
+def recover_part(cfg, streak_lost: float, wins_left: int = 0) -> float:
+    """What a win should pay back of the streak's debt: all of it, or 1/N with Recover over N wins."""
+    return streak_lost / max(1, wins_left or int(getattr(cfg, "recover_wins", 1) or 1))
+
+
 def shares_for(cfg, step: int, streak_lost: float, p: float, rate: float = DEFAULT_FEE_RATE,
-               exponent: float = 1.0) -> float:
+               exponent: float = 1.0, wins_left: int = 0) -> float:
     """How many shares to buy at price p for this step of the ladder (at least MIN_SHARES)."""
     per_share = p + fee_per_share(p, rate, exponent)
     if cfg.sizing == "recover":
-        # a win must leave base_profit after paying back the streak: shares - shares * per_share = target
-        shares = ceil2((cfg.base_profit_usd + streak_lost) / (1 - per_share))
+        # a win must leave base_profit after paying back (its part of) the streak: shares - shares * per_share = target
+        shares = ceil2((cfg.base_profit_usd + recover_part(cfg, streak_lost, wins_left)) / (1 - per_share))
     else:
         shares = floor2(cfg.start_usd * cfg.multiplier ** (step - 1) / per_share)
     return max(MIN_SHARES, shares)
@@ -95,13 +110,14 @@ class Rung:
     step: int
     shares: float
     cost: float          # what this bet costs
-    win_profit: float    # what a win at this step earns, after paying back the streak
+    win_profit: float    # what a win at this step earns, after paying back (its part of) the streak
     lost_total: float    # the streak's total loss if this bet loses too
     fits: bool           # the budget can pay it
+    left_after_win: float = 0.0   # Recover over N wins: debt still owed after a win here
 
 
 def build_ladder(cfg, p: float, budget: float, rate: float = DEFAULT_FEE_RATE, max_rows: int = 30,
-                 step: int = 1, lost: float = 0.0) -> list[Rung]:
+                 step: int = 1, lost: float = 0.0, wins_left: int = 0) -> list[Rung]:
     """The ladder at a constant price p: what each step costs and wins, and whether `budget` pays for it.
 
     step/lost: start from the middle of a streak (step 4 after losing $11.22) instead of a fresh ladder; `budget`
@@ -110,13 +126,16 @@ def build_ladder(cfg, p: float, budget: float, rate: float = DEFAULT_FEE_RATE, m
     rows, first = [], step
     limit = cfg.max_steps or (first + max_rows - 1)
     for step in range(first, min(limit, first + max_rows - 1) + 1):
-        shares = shares_for(cfg, step, lost, p, rate)
+        shares = shares_for(cfg, step, lost, p, rate, wins_left=wins_left)
         cost = cost_of(shares, p, rate)
         fits = lost + cost <= budget + 1e-9
-        rows.append(Rung(step, shares, round(cost, 2), round(shares - cost - lost, 2), round(lost + cost, 2), fits))
+        part = recover_part(cfg, lost, wins_left) if cfg.sizing == "recover" else lost
+        rows.append(Rung(step, shares, round(cost, 2), round(shares - cost - part, 2), round(lost + cost, 2), fits,
+                         round(lost - part, 2)))
         if not fits:
             break
         lost += cost
+        wins_left = 0                       # after a loss the debt is spread over N wins again
     return rows
 
 
@@ -132,13 +151,14 @@ class Sizing:
     start_usd: float
     multiplier: float
     max_steps: int
+    recover_wins: int = 1
 
 
 def with_base(cfg, base: float) -> Sizing:
     """cfg's sizing with the Profit per win (recover) or Starting bet (multiply) set to `base`."""
     recover = cfg.sizing == "recover"
     return Sizing(cfg.sizing, base if recover else cfg.base_profit_usd, cfg.start_usd if recover else base,
-                  cfg.multiplier, cfg.max_steps)
+                  cfg.multiplier, cfg.max_steps, int(getattr(cfg, "recover_wins", 1) or 1))
 
 
 def base_for_steps(cfg, steps: int, p: float, budget: float, rate: float = DEFAULT_FEE_RATE) -> Optional[float]:
@@ -226,7 +246,7 @@ def walk_asks(asks: Sequence[tuple], shares: float, max_price: float, rate: floa
 
 
 def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], max_price: float,
-                    rate: float = DEFAULT_FEE_RATE, exponent: float = 1.0) -> Optional[float]:
+                    rate: float = DEFAULT_FEE_RATE, exponent: float = 1.0, wins_left: int = 0) -> Optional[float]:
     """Like shares_for, but priced on the real order book: a big bet climbs the asks (slippage), so a recover bet
     sized at the best price alone wins back less than the streak lost. Returns the fewest shares (to the cent)
     whose win, after the cost of walking the asks up to max_price (fees included), leaves the Profit per win plus
@@ -237,13 +257,13 @@ def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], m
         return None
     if cfg.sizing != "recover":
         return shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)
-    target = cfg.base_profit_usd + streak_lost
+    target = cfg.base_profit_usd + recover_part(cfg, streak_lost, wins_left)
 
     def net(n: float) -> Optional[float]:          # what a win of n shares earns over their cost
         f = walk_asks(asks, n, max_price, rate, exponent)
         return None if f is None else n - f.cost
 
-    lo = shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)   # enough if the best ask had them all
+    lo = shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent, wins_left)   # if the best ask had them all
     if (net(lo) or -1) >= target - 1e-9:
         return lo
     hi = floor2(sum(size for _, size in asks))
@@ -259,13 +279,13 @@ def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], m
     return hi
 
 
-def streak_sizing(cfg, step: int, base: float, budget: float):
+def streak_sizing(cfg, step: int, base: float, budget: float, carried: bool = False):
     """(sizing, base) for a bet at `step` of a streak. Without Steps to survive: (cfg, 0). With it, a new streak
     (step 1, or no base yet) works out its first bet from `budget` at the Max price; later steps keep `base`.
     sizing is None when the budget can't pay for the steps."""
     if not cfg.target_steps:
         return cfg, 0.0
-    if step == 1 or not base:
+    if (step == 1 and not carried) or not base:     # carried: a debt still being won back keeps its streak's base
         base = base_for_steps(cfg, cfg.target_steps, cfg.max_price, budget)
         if base is None:
             return None, 0.0

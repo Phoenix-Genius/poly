@@ -235,16 +235,18 @@ class Controller:
         lad = self.bot.ladder
         if body.get("from_now"):      # the current streak with these settings; else a fresh ladder from step 1
             return self._ladder(cfg, price, lad.step, lad.base if cfg.target_steps == self.cfg.target_steps else 0)
-        return self._ladder(cfg, price, 1, 0.0)
+        return self._ladder(cfg, price, 1, 0.0, fresh=True)
 
-    def _ladder(self, cfg: BotConfig, price: float, step: int, base: float) -> dict:
+    def _ladder(self, cfg: BotConfig, price: float, step: int, base: float, fresh: bool = False) -> dict:
         """ladder_view for the current streak (or a fresh one at step 1), with Steps to survive worked out."""
         lad = self.bot.ladder
-        lost = lad.streak_lost if step > 1 else 0.0
+        lost, wins_left = (0.0, 0) if fresh else (lad.streak_lost, lad.wins_left)
         budget = self._budget(cfg) + lad.streak_lost
-        sizing, base = streak_sizing(cfg, step, base, budget - lost)
+        sizing, base = streak_sizing(cfg, step, base, budget - lost, lost > 0)
         view = ladder_view(sizing or cfg, price, budget, step, lost,
-                           streak_bets(read_trades(self.cfg.trade_log), step) if step > 1 else None)
+                           streak_bets(read_trades(self.cfg.trade_log), step) if step > 1 else None, wins_left)
+        view["recover_wins"] = cfg.recover_wins if cfg.sizing == "recover" else 1
+        view["wins_left"] = (wins_left or view["recover_wins"]) if lost > 0 else 0
         view["auto"] = None if not cfg.target_steps else {
             "steps": cfg.target_steps, "base": base if sizing else None, "price": cfg.max_price,
             "label": "Profit per win" if cfg.sizing == "recover" else "Starting bet"}
@@ -308,6 +310,7 @@ class Controller:
             "budget_left": round(b.budget_left(), 2) if bal is not None else None,
             "until_earn_left": round(b.until_earn_left(), 2),
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
+            "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",
             "ladder": self._ladder(self.cfg, 0.5, b.ladder.step, b.ladder.base),
@@ -332,10 +335,10 @@ def streak_bets(trades: list[dict], step: int) -> list[dict]:
 
 
 def ladder_view(cfg: BotConfig, price: float, budget: float, step: int = 1, lost: float = 0.0,
-                played: Optional[list] = None) -> dict:
+                played: Optional[list] = None, wins_left: int = 0) -> dict:
     """The whole ladder: the streak's steps already played (`played`, real bets from the trade log, all lost), then
     from `step` on what the next bets would cost at `price` after the streak lost `lost`."""
-    rows = build_ladder(cfg, price, budget, step=step, lost=lost)
+    rows = build_ladder(cfg, price, budget, step=step, lost=lost, wins_left=wins_left)
     done, total = [], 0.0
     for t in played or []:
         total += float(t["cost"])

@@ -4,6 +4,25 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-12
+
+### Recover over N wins (split recovery)
+- **What:** a new recover-sizing setting, **Recover over (wins)** (1–5, default 1 = as before). With 2, each win
+  pays back half of what the streak still owes plus the Profit per win, and the rest is carried to the next bets;
+  with 3, a third. A loss adds to the debt and spreads it over N wins again; the debt is cleared after N wins.
+  Bets grow ~1.5× (2 wins) or ~1.35× (3 wins) per loss instead of ~2×: at 0.50 and $10 per win, 10 losses in a row
+  cost ~$1,445 or ~$608 instead of ~$14,613, so Steps to survive fits a much bigger Profit per win. The ladder
+  shows what each win leaves owed ("+$10.00 · $16.50 left"), the step tile "N wins to clear", the Sizing chip
+  "recover · 2 wins", and the log what's still to win back after a win.
+- **Why:** the owner asked about loss-recovery strategies; recommended split recovery; owner: "ok, plz".
+- **How:** `Ladder.wins_left` + `Ladder.record(..., recover_wins)` carry the debt; `strategy.recover_part` is what a
+  win pays back (used by `shares_for`, `shares_for_book`, `build_ladder`; `Rung.left_after_win`); `Sizing` carries
+  `recover_wins`; `streak_sizing(..., carried)` keeps a streak's Steps-to-survive base while its debt is still being
+  won back. Page: field in Bet size (recover only), chip, tile, ladder note and column.
+- **Tests:** `test_strategy.RecoverOverWinsTest` (debt carried and re-spread, 1 = old behaviour, slower growth,
+  bigger Steps-to-survive base, book sizing); `test_engine`: two wins clear a streak with both profits kept. The
+  page checked in headless Chromium with a bot $33 down at step 3.
+
 ## [0.1.4] - 2026-11-11
 
 ### Until earn counts since Reset, not since Start

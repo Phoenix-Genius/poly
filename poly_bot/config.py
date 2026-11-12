@@ -56,6 +56,12 @@ FIELDS: dict[str, tuple] = {
     "multiplier": (2.2, "number", None, "Multiplier after loss",
                    "multiply sizing: after a loss the next bet costs this many times more. 2 = $3 -> $6 -> $12. "
                    "At a price of 0.50 a win pays about 1.93x the bet, so 2.1 or more is needed to recover."),
+    "recover_wins": (1, "int", None, "Recover over (wins)",
+                     "recover sizing: how many wins pay back a losing streak. 1 = one win pays back everything "
+                     "(bets about double after each loss). 2 = each win pays back half of what's still owed plus "
+                     "the Profit per win (bets grow about 1.5x), 3 = a third (about 1.35x): far more losses in a "
+                     "row fit in the budget, but a streak needs 2 or 3 wins to clear, and a loss in between adds "
+                     "to the debt."),
     "target_steps": (0, "int", None, "Steps to survive",
                      "Work out the first bet so the budget pays for this many losses in a row, e.g. 7, even if "
                      "every bet costs the Max price. recover sizing sets the Profit per win, multiply sizing the "
@@ -167,6 +173,8 @@ class BotConfig:
             raise ValueError("Max price must be between 0.02 and 0.98")
         if not (0 <= self.min_price < self.max_price):
             raise ValueError("Min price must be 0 or more and below the max price")
+        if not (1 <= self.recover_wins <= 5):
+            raise ValueError("Recover over (wins) must be between 1 and 5")
         if not (0 <= self.target_steps <= 30):
             raise ValueError("Steps to survive must be between 1 and 30, or 0 for off")
         if self.target_steps and self.max_steps and self.max_steps < self.target_steps:

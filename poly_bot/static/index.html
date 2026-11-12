@@ -411,12 +411,12 @@ $("#newDlg").addEventListener("close", async () => {
 });
 
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
-const SIZING_ONLY = {base_profit_usd: "recover", start_usd: "multiply", multiplier: "multiply"};
+const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply"};
 const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
-  {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "multiplier"]},
+  {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
   {title: "Side", icon: "🧭", tone: "dir", keys: ["side_mode", "first_side"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
@@ -492,7 +492,7 @@ function formValues() {
 function showFields() {
   const v = formValues();
   const auto = +v.target_steps > 0;   // Steps to survive works out the first bet: its box isn't used then
-  for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier"));
+  for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier" && k !== "recover_wins"));
   $('.field[data-key="first_side"]')?.classList.toggle("hide", !SIDE_FIRST.includes(v.side_mode));
   $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
   renderSettingsHead(v);
@@ -517,7 +517,7 @@ function renderSettingsHead(v) {
     chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd"),
     chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
     bet,
-    chip("📐", "Sizing", v.sizing === "recover" ? "recover" : `×${esc(v.multiplier)}`, "sizing"),
+    chip("📐", "Sizing", v.sizing === "recover" ? (n(v.recover_wins) > 1 ? `recover · ${n(v.recover_wins)} wins` : "recover") : `×${esc(v.multiplier)}`, "sizing"),
     chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps"),
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
     chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
@@ -586,7 +586,7 @@ function render() {
       <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
-      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${s.ladder.fits}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}</div><div class="steps">${stepBar}</div></div>
+      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${s.ladder.fits}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
       <div class="tile"><div class="k">🧮 Budget left</div><div class="v num">${money(s.budget_left)}</div></div>
     </div>
@@ -664,16 +664,16 @@ function renderLadder() {
   const view = usePreview ? preview : status.ladder;
   $("#ladderPanel").classList.toggle("preview", !!(usePreview && formDirty));
   if (view.error) { el.innerHTML = `<p class="neg">${esc(view.error)}</p>`; return; }
-  $("#ladderSum").textContent = view.step > 1
-    ? `now at step ${view.step}: this streak lost ${money(view.lost)} · ${view.fits} more bets fit in the ${money(view.left)} left`
+  $("#ladderSum").innerHTML = view.lost > 0
+    ? `now at step ${view.step}: ${view.recover_wins > 1 ? "still to win back" : "this streak lost"} ${money(view.lost)}${view.recover_wins > 1 ? ` over ${view.wins_left} win${view.wins_left > 1 ? "s" : ""}` : ""} · ${view.fits} more bets fit in the ${money(view.left)} left`
     : `${view.fits} losses in a row fit in ${money(view.budget)}`;
   $("#ladderNote").textContent = usePreview && formDirty ? "(preview of unsaved settings)" : "";
   const a = view.auto;
   const autoNote = !a ? "" : a.base == null
     ? `<p class="neg" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: the budget can't pay for ${a.steps} bets in a row even at 5 shares each.</p>`
     : `<p class="muted" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: ${a.label} <b>${money(a.base)}</b> for this streak, so ${a.steps} losses in a row fit even if every bet costs ${a.price.toFixed(2)}.</p>`;
-  el.innerHTML = autoNote + `${view.step > 1 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit. A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
-    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
+  el.innerHTML = autoNote + `${view.lost > 0 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">${view.recover_wins > 1 ? `Recover over ${view.recover_wins} wins: the next win pays back ${money(view.lost / view.wins_left)} of the ${money(view.lost)} still owed plus your profit; the rest is carried to the next bets. A loss spreads the debt over ${view.recover_wins} wins again.` : `Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit.`} A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
+    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}${r.left_after_win > 0.005 ? ` <small class="muted">· ${money(r.left_after_win)} left</small>` : ""}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
   </table>`;
 }
 function historyTable(rows) {

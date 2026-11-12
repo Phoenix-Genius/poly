@@ -134,6 +134,7 @@ use 2.1 or more. recover sizing works it out for you.
 | `base_profit_usd` | 2.5 | recover: what each winning streak earns after fees. |
 | `start_usd` | 3 | multiply: the first bet's cost, fee included. |
 | `multiplier` | 2.2 | multiply: the next bet after a loss is this many times bigger. |
+| `recover_wins` | 1 | **Recover over (wins)**, recover sizing: how many wins pay back a losing streak. 1 = one win pays back everything (bets ~2× per loss). 2 = each win pays back half of what is still owed plus the Profit per win (~1.5× per loss), 3 = a third (~1.35×). The rest is carried to the next bets; a loss spreads the debt over N wins again. |
 | `target_steps` | 0 (= off) | Steps to survive: works out the first bet (Profit per win, or Starting bet with multiply) so the budget pays for this many losses in a row even at the Max price. Recalculated at each new streak from the budget left. |
 | `max_steps` | 0 (= budget decides) | End the ladder after this many losses in a row. |
 | `on_ladder_end` | stop | `stop` = halt (press Reset). `reset` = accept the loss and start again at step 1. |

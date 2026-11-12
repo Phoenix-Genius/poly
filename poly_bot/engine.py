@@ -101,7 +101,7 @@ class Bot:
     def sizing(self):
         """The sizing for the next bet (see strategy.streak_sizing); remembers a new streak's Steps-to-survive bet."""
         cfg, lad = self.cfg, self.ladder
-        sizing, base = streak_sizing(cfg, lad.step, lad.base, self.budget_left())
+        sizing, base = streak_sizing(cfg, lad.step, lad.base, self.budget_left(), lad.streak_lost > 0)
         if sizing is not None and cfg.target_steps and base != lad.base:
             lad.base = base
             self.log.info("Steps to survive %d: %s $%.2f for this streak (budget left $%.2f, at price %.2f)",
@@ -204,7 +204,7 @@ class Bot:
         payout = self.client.settle(bet["slug"], result)
         won = result == bet["side"]
         profit = round(payout - bet["cost"], 6)
-        self.ladder.record(bet["side"], won, profit)
+        self.ladder.record(bet["side"], won, profit, self.cfg.recover_wins if self.cfg.sizing == "recover" else 1)
         self.bet, self.live, self._slow_warned = None, {}, False
         self.save()
         append_trade(self.cfg.trade_log, {
@@ -222,6 +222,9 @@ class Bot:
                       "WIN " if won else "LOSS", bet["title"], bet["side"].upper(), bet["price"], result.upper(),
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
                       abs(self.ladder.pnl))
+        if won and self.ladder.streak_lost > 0:
+            self.log.info("Still to win back from the streak: $%.2f over %d more win(s) (Recover over %d wins)",
+                          self.ladder.streak_lost, self.ladder.wins_left, self.cfg.recover_wins)
         if self.target_reached():
             self._halt("target", f"Earned ${self.ladder.pnl:.2f} since Reset, the Until earn target. Press Reset "
                                  f"to start counting again, or raise Until earn.")
@@ -267,7 +270,7 @@ class Bot:
         # price would then win back less than the streak lost
         asks = self.pm.book(cur.token(side))["asks"]
         shares = shares_for_book(sizing, self.ladder.step, self.ladder.streak_lost, asks, cfg.max_price,
-                                 cur.fee_rate, cur.fee_exponent)
+                                 cur.fee_rate, cur.fee_exponent, self.ladder.wins_left)
         if shares is None:
             return self._wait(f"Not enough {side.upper()} shares for sale up to {cfg.max_price:.2f} for a win to "
                               f"pay back the streak; retrying (window ends in {fmt_secs(window - elapsed)})",
