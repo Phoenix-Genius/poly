@@ -565,7 +565,8 @@ function panel(id, title, sum, body) {
 function render() {
   const s = status, page = $("#page");
   if (!s) { page.innerHTML = current ? '<div class="empty">Loading…</div>' : '<div class="empty">Make your first bot with <b>＋ New bot</b>.</div>'; return; }
-  const running = s.running, maxSteps = Math.max(s.ladder.fits || 1, s.step);
+  // ladder.fits counts the bets still ahead (from this step on), so add the steps already lost: step 3 + 6 more = 8
+  const running = s.running, maxSteps = Math.max((s.ladder.fits || 0) + s.step - 1, s.step, 1);
   const stepBar = Array.from({length: Math.min(maxSteps, 20)}, (_, i) => `<i class="${i + 1 < s.step ? "on" : i + 1 === s.step ? "now" : ""}"></i>`).join("");
   const keepScroll = $("#log")?.scrollTop, logAtEnd = !$("#log") || $("#log").scrollHeight - $("#log").scrollTop - $("#log").clientHeight < 30;
   page.innerHTML = `
@@ -586,7 +587,7 @@ function render() {
       <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
-      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${s.ladder.fits}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
+      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${maxSteps}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
       <div class="tile"><div class="k">🧮 Budget left</div><div class="v num">${money(s.budget_left)}</div></div>
     </div>

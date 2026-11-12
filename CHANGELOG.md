@@ -4,6 +4,16 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-12
+
+### Step tile counts the whole ladder
+- **What:** the Step tile said "Step 3 of 6" while the ladder showed steps 1-8 fitting; it now says "Step 3 of 8",
+  like the bot list, and its bar has 8 segments.
+- **Why:** the owner: "why step 3 of 6? step 8 available, isn't it?"
+- **How:** `ladder.fits` counts only the bets still ahead (the ladder header's "6 more bets fit"); `render()` now
+  adds the steps already lost (`fits + step - 1`), as `web.py` already did for the bot list.
+- **Tests:** the existing suite.
+
 ## [0.1.5] - 2026-11-12
 
 ### Recover over N wins (split recovery)
