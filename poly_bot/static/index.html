@@ -67,6 +67,16 @@
   .bot-item:hover { border-color: var(--muted); border-left-color: var(--state); }
   .bot-item.active { border-color: var(--accent); border-left-color: var(--state, var(--accent)); background: var(--active-bg); box-shadow: 0 0 0 1px var(--accent); }
   .bi-top { display: flex; align-items: center; gap: 7px; }
+  .bot-item[draggable="true"] { cursor: grab; }
+  .bot-item.dragging { opacity: .4; }
+  .bot-item.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+  .bot-item.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+  @media (max-width: 900px) { .bot-item.drop-before { box-shadow: -3px 0 0 0 var(--accent); } .bot-item.drop-after { box-shadow: 3px 0 0 0 var(--accent); } }
+  .bi-pin { border: 0; background: none; padding: 0 3px; font-size: 13px; line-height: 1; cursor: pointer; filter: grayscale(1); opacity: 0; }
+  .bot-item:hover .bi-pin, .bi-pin:focus-visible { opacity: .45; }
+  .bi-pin.on { filter: none; opacity: 1 !important; }
+  .bi-pin:hover { opacity: 1 !important; }
+  .bi-pin:focus-visible { outline: 2px solid var(--accent); }
   .bi-name { font-weight: 650; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bi-line { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bi-money { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; font-variant-numeric: tabular-nums; }
@@ -191,6 +201,33 @@
   .bet .v { font-weight: 700; }
   .side-up { color: var(--up); } .side-down { color: var(--down); }
   .chance { height: 8px; background: var(--down); margin-top: 8px; position: relative; }
+  .stopmenu { position: fixed; z-index: 40; background: var(--panel); border: 1px solid var(--red); box-shadow: 0 6px 18px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+  .stopmenu button { text-align: left; padding: 8px 12px; border: 0; background: none; cursor: pointer; font-weight: 600; }
+  .stopmenu button small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+  .stopmenu button:hover, .stopmenu button:focus-visible { background: var(--red-bg); outline: none; }
+  .winnow { display: flex; gap: 16px; align-items: center; margin-top: 10px; padding: 8px 12px; border-left: 4px solid var(--muted); background: var(--panel); }
+  .winnow.ahead { border-color: var(--green); background: var(--green-bg); } .winnow.behind { border-color: var(--red); background: var(--red-bg); }
+  .winnow .k { font-size: 12px; color: var(--muted); }
+  .winnow .big { font-size: 30px; font-weight: 800; line-height: 1.1; }
+  .winnow.ahead .big { color: var(--green); } .winnow.behind .big { color: var(--red); }
+  .winnow .both { flex: 1; min-width: 0; font-size: 13px; } .winnow .mine { font-weight: 700; }
+  #simPanel { --sec: #0d9488; } .dark #simPanel { --sec: #2dd4bf; }
+  .simform { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+  .simform label { display: block; font-size: 12px; color: var(--muted); }
+  .simform input { width: 110px; padding: 4px 6px; border: 1px solid var(--line); background: var(--input); }
+  .simstats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin: 8px 0; }
+  .simstats > div { background: var(--panel); padding: 8px 10px; }
+  .simstats .label { font-size: 12px; color: var(--muted); } .simstats .value { font-size: 18px; font-weight: 700; }
+  .simstats .sub { font-size: 11px; color: var(--muted); }
+  .simcharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+  .simchart { background: var(--panel); padding: 8px 10px; } .simchart h3 { margin: 0; font-size: 13px; }
+  .simchart svg { width: 100%; height: auto; display: block; font-size: 11px; }
+  .simchart svg text { fill: var(--muted); }
+  .simchart .grid-line { stroke: var(--line); } .simchart .zero { stroke: var(--muted); stroke-dasharray: 3 3; }
+  .simchart .bar-loss { fill: var(--red); } .simchart .bar-gain { fill: var(--accent); }
+  .simchart .path { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .75; }
+  .simlog { margin-top: 10px; } .simlog summary { cursor: pointer; padding: 4px 0; } .simlog .scroll { max-height: 420px; overflow: auto; } .simlog tr.ev td { text-align: left; color: var(--amber); font-weight: 600; }
+  .simhelp { font-size: 12px; color: var(--muted); margin: 4px 0; }
   .chance b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--up); }
 
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
@@ -202,7 +239,6 @@
   tr.played td { color: var(--muted); }
   .scroll { overflow-x: auto; }
   .ladder-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 13px; }
-  .ladder-tools input { width: 70px; padding: 3px 6px; border: 1px solid var(--line); background: var(--input); }
   #ladderPanel.preview { --sec: var(--accent); }
   pre#log { margin: 0; max-height: 320px; overflow: auto; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; }
 
@@ -335,6 +371,64 @@ applyTheme(localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: 
 $("#theme").onclick = () => { const t = document.documentElement.classList.contains("dark") ? "light" : "dark"; localStorage.setItem("theme", t); applyTheme(t); };
 
 // --- bot list ---
+// --- bot list order (like the hyperliquid bot): drag and drop, Alt+arrows, 📌 pins to the top ---
+// Dropping a bot onto a pinned bot pins it; onto an unpinned one unpins it. The order is saved by the app.
+let dragId = null;
+async function saveOrder(ids, pinned, focusId) {
+  try { bots = (await api("/api/order", {order: ids, pinned})).bots; }
+  catch (err) { toast(err.message); }
+  renderBots();
+  if (focusId) document.querySelector(`.bot-item[data-id="${CSS.escape(focusId)}"]`)?.focus();
+}
+function clearDrop() { document.querySelectorAll(".drop-before, .drop-after").forEach(el => el.classList.remove("drop-before", "drop-after")); }
+function dropSpot(e) {
+  const item = e.target.closest(".bot-item");
+  if (!item || item.dataset.id === dragId) return null;
+  const r = item.getBoundingClientRect(), row = getComputedStyle($("#bots")).flexDirection === "row";
+  return {item, after: row ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2};
+}
+function wireBotOrder() {
+  const list = $("#bots");
+  list.addEventListener("dragstart", e => {
+    const item = e.target.closest(".bot-item"); if (!item) return;
+    dragId = item.dataset.id;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragId);
+    item.classList.add("dragging");
+  });
+  list.addEventListener("dragover", e => {
+    if (!dragId) return;
+    e.preventDefault();
+    clearDrop();
+    const spot = dropSpot(e);
+    if (spot) spot.item.classList.add(spot.after ? "drop-after" : "drop-before");
+  });
+  list.addEventListener("drop", e => {
+    if (!dragId) return;
+    e.preventDefault();
+    const spot = dropSpot(e), moved = dragId;
+    clearDrop(); dragId = null;
+    if (!spot) return renderBots();
+    const target = bots.find(b => b.id === spot.item.dataset.id);
+    const ids = bots.map(b => b.id).filter(id => id !== moved);
+    ids.splice(ids.indexOf(target.id) + (spot.after ? 1 : 0), 0, moved);
+    const pinned = bots.filter(b => b.pinned && b.id !== moved).map(b => b.id);
+    if (target.pinned) pinned.push(moved);
+    saveOrder(ids, pinned);
+  });
+  list.addEventListener("dragend", () => { clearDrop(); if (dragId) { dragId = null; renderBots(); } });
+  list.addEventListener("keydown", e => {
+    const item = e.target.closest(".bot-item"), dir = {ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1}[e.key];
+    if (!item || !e.altKey || !dir) return;
+    e.preventDefault();
+    const id = item.dataset.id, b = bots.find(x => x.id === id);
+    const group = bots.filter(x => !!x.pinned === !!b.pinned).map(x => x.id), i = group.indexOf(id), j = i + dir;
+    if (j < 0 || j >= group.length) return;             // moves stay inside the pinned / unpinned group
+    [group[i], group[j]] = [group[j], group[i]];
+    const others = bots.filter(x => !!x.pinned !== !!b.pinned).map(x => x.id);
+    saveOrder(b.pinned ? [...group, ...others] : [...others, ...group], bots.filter(x => x.pinned).map(x => x.id), id);
+  });
+}
 async function loadBots() {
   const d = await api("/api/bots");
   bots = d.bots;
@@ -344,10 +438,12 @@ async function loadBots() {
     return;
   }
   if (!bots.find(b => b.id === current)) current = bots[0]?.id || "";
-  renderBots();
+  if (!dragId) renderBots();          // not mid-drag: a redraw would drop the card being dragged
 }
+// fits = how many steps the budget reaches in this streak (lost ones included). One pip per reachable step:
+// lost = amber, the current one = red. A step past the budget gets no pip; the bar just ends full.
 function stepPips(step, fits) {
-  const n = Math.min(Math.max(fits || 1, step), 20);
+  const n = Math.min(Math.max(fits ?? step, 1), 20);
   return Array.from({length: n}, (_, i) => `<i class="${i + 1 < step ? "on" : i + 1 === step ? "now" : ""}"></i>`).join("");
 }
 function renderBots() {
@@ -362,23 +458,33 @@ function renderBots() {
   $("#bots").innerHTML = bots.map(b => {
     const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
     const act = b.locked ? "" : b.running
-      ? `<button class="bi-act" data-stop="${esc(b.id)}" title="Stop this bot"><span class="stop">■</span> Stop</button>`
+      ? `<button class="bi-act" data-stop="${esc(b.id)}" title="Stop this bot: right away or after a win"><span class="stop">■</span> ${b.stop_after_win ? "Stop after win…" : "Stop"}</button>`
       : `<button class="bi-act" data-start="${esc(b.id)}" title="Start this bot"><span class="go">▶</span> Start</button>`;
     const next = b.bet_side ? `${b.bet_side === "up" ? "📈 Up" : "📉 Down"} <b>${money(b.bet_cost)}</b>` : `🎯 next <b>${money(b.next_cost)}</b>`;
-    return `<div class="bot-item st-${st} ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}">
+    return `<div class="bot-item st-${st} ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}" draggable="true" tabindex="0"
+         title="Drag to reorder · Alt+↑/↓ moves the selected bot">
       <div class="bi-top"><span class="dot ${st === "stop" ? "" : st}"></span><span class="bi-name" data-no-i18n>${esc(b.name)}</span>
+        <button class="bi-pin ${b.pinned ? "on" : ""}" data-pin="${esc(b.id)}" aria-pressed="${!!b.pinned}"
+                title="${b.pinned ? "Unpin" : "Pin to the top"}" aria-label="${b.pinned ? "Unpin" : "Pin"} ${esc(b.name)}">📌</button>
         <span class="chip ${b.network === "live" ? "live" : "paper"}">${b.network === "live" ? "LIVE" : "paper"}</span></div>
       <div class="bi-line">${esc(b.coin)} · ${esc(b.timeframe)} rounds</div>
       <div class="bi-money"><span class="bal" title="${b.network === "live" ? "pUSD balance" : "Paper balance"}">${money(b.balance)}</span>
         <span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
-      <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.step}</b> · ${next}</span></div>
+      <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
       <div class="bi-status"><span class="txt ${b.halted ? "halt" : ""}" title="${esc(b.message)}">${esc(b.message || "")}</span>${act}</div>
     </div>`;
   }).join("");
   for (const el of document.querySelectorAll(".bot-item")) el.onclick = () => select(el.dataset.id);
+  for (const el of document.querySelectorAll(".bi-pin")) el.onclick = async e => {
+    e.stopPropagation();
+    const b = bots.find(x => x.id === el.dataset.pin);
+    try { bots = (await api(`/api/bots/${b.id}/pin`, {pinned: !b.pinned})).bots; renderBots(); }
+    catch (err) { toast(err.message); }
+  };
   for (const el of document.querySelectorAll(".bi-act")) el.onclick = async e => {
     e.stopPropagation();
     const id = el.dataset.start || el.dataset.stop, b = bots.find(x => x.id === id);
+    if (el.dataset.stop) return stopMenu(el, id, b?.stop_after_win);
     if (el.dataset.start && b?.network === "live" && !confirm(`Start "${b.name}" LIVE trading with REAL money?`)) return;
     el.disabled = true;
     try { const s = await api(`/api/bots/${id}/${el.dataset.start ? "start" : "stop"}`, {}); if (id === current && s?.settings) { status = s; render(); } }
@@ -412,18 +518,18 @@ $("#newDlg").addEventListener("close", async () => {
 
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
 const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply"};
-const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps"];   // shown empty when 0
+const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "hit_max_price", "time_min_price"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
-  {title: "Side", icon: "🧭", tone: "dir", keys: ["side_mode", "first_side"]},
+  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "hit_max_price", "side_mode", "first_side"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
 ];
 const WIDE = ["bot_name"];
 const PLACEHOLDER = {bot_name: "empty = random animal", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
-  entry_window_sec: "auto"};
+  entry_window_sec: "auto", hit_max_price: "no limit", time_min_price: "any lead"};
 const SPREAD_HELP = "Slide to set Min and Max price around 0.50 in one go: ±5¢ = 0.45–0.55, ±10¢ = 0.40–0.60. " +
   "You can still set Min and Max one by one; the slider then says custom.";
 // the Price ± box: fills Min/Max price, and shows their spread when they're even around 0.50
@@ -493,7 +599,15 @@ function showFields() {
   const v = formValues();
   const auto = +v.target_steps > 0;   // Steps to survive works out the first bet: its box isn't used then
   for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier" && k !== "recover_wins"));
-  $('.field[data-key="first_side"]')?.classList.toggle("hide", !SIDE_FIRST.includes(v.side_mode));
+  // each Bet mode shows only its own fields: side = Side mode + Min/Max price + Entry window, hit = Hit price,
+  // time = Time left + Leader at least; Pay at most is shared by hit and time
+  const m = v.entry_mode, side = m === "side";
+  $('.field[data-key="first_side"]')?.classList.toggle("hide", !side || !SIDE_FIRST.includes(v.side_mode));
+  for (const k of ["side_mode", "min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
+  $('.field[data-key="hit_price"]')?.classList.toggle("hide", m !== "hit");
+  for (const k of ["time_left_sec", "time_min_price"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", m !== "time");
+  $('.field[data-key="hit_max_price"]')?.classList.toggle("hide", side);
+  $('.field[data-key="entry_window_sec"]')?.classList.toggle("hide", m === "time");
   $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
   renderSettingsHead(v);
 }
@@ -512,7 +626,10 @@ function renderSettingsHead(v) {
     : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
     up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
-  const win = n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
+  const hit = v.entry_mode === "hit", time = v.entry_mode === "time";
+  const left = n(v.time_left_sec), leftTxt = left % 60 ? `${left} s` : `${left / 60} min`;
+  const cap = n(v.hit_max_price) > 0 ? `max ${n(v.hit_max_price).toFixed(2)}` : "no limit";
+  const win = time ? `${leftTxt} left` : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : hit ? "whole round" : "auto";
   $("#summary").innerHTML = `<div class="chips pairs">` + [
     chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd"),
     chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
@@ -520,8 +637,10 @@ function renderSettingsHead(v) {
     chip("📐", "Sizing", v.sizing === "recover" ? (n(v.recover_wins) > 1 ? `recover · ${n(v.recover_wins)} wins` : "recover") : `×${esc(v.multiplier)}`, "sizing"),
     chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps"),
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
-    chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
-    chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
+    hit ? chip("💲", "Hit", `${n(v.hit_price).toFixed(2)} · ${cap}`, "hit_price")
+      : time ? chip("💲", "Leader", `${n(v.time_min_price) > 0 ? n(v.time_min_price).toFixed(2) + "+" : "any"} · ${cap}`, "time_min_price")
+      : chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
+    hit ? chip("🔁", "Side", "first to hit", "entry_mode") : time ? chip("🔁", "Side", "leader", "entry_mode") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
     chip("⏱️", "Entry", win, "entry_window_sec"),
   ].join("") + `</div>`;
 }
@@ -551,8 +670,8 @@ let preview = null;
 function schedulePreview() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
-    const price = $("#planPrice")?.value || 0.5;
-    try { preview = await api(`/api/bots/${current}/plan`, {...(formDirty ? formValues() : {}), price, from_now: !formDirty}); }
+    if (!formDirty) { preview = null; renderLadder(); return; }
+    try { preview = await api(`/api/bots/${current}/plan`, {...formValues(), from_now: false}); }
     catch (e) { preview = {error: e.message}; }
     renderLadder();
   }, 300);
@@ -562,12 +681,24 @@ function schedulePreview() {
 function panel(id, title, sum, body) {
   return `<section class="panel ${folded.has(id) ? "folded" : ""}" id="${id}"><h2 data-fold="${id}">${title} <span class="sum">${sum}</span></h2><div class="body">${body}</div></section>`;
 }
+// the Bet mode tile: which mode and its main setting, e.g. "Hit 0.75", "Time · 2 min left", "Side · random"
+function modeTile(v) {
+  const m = v.entry_mode, cap = +v.hit_max_price > 0 ? ` · max ${(+v.hit_max_price).toFixed(2)}` : "";
+  const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
+  if (m === "hit") return `Hit ${(+v.hit_price).toFixed(2)} ${small("first side to reach it" + cap)}`;
+  if (m === "time") {
+    const l = +v.time_left_sec, left = l % 60 ? `${l} s` : `${l / 60} min`;
+    return `Time · ${left} ${small("left, the leader" + (+v.time_min_price > 0 ? ` at ${(+v.time_min_price).toFixed(2)}+` : "") + cap)}`;
+  }
+  return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · ${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`)}`;
+}
 function render() {
   const s = status, page = $("#page");
   if (!s) { page.innerHTML = current ? '<div class="empty">Loading…</div>' : '<div class="empty">Make your first bot with <b>＋ New bot</b>.</div>'; return; }
   // ladder.fits counts the bets still ahead (from this step on), so add the steps already lost: step 3 + 6 more = 8
-  const running = s.running, maxSteps = Math.max((s.ladder.fits || 0) + s.step - 1, s.step, 1);
-  const stepBar = Array.from({length: Math.min(maxSteps, 20)}, (_, i) => `<i class="${i + 1 < s.step ? "on" : i + 1 === s.step ? "now" : ""}"></i>`).join("");
+  const running = s.running, maxSteps = (s.ladder.fits || 0) + s.step - 1, over = s.step > maxSteps;
+  const stepBar = stepPips(s.step, maxSteps);
+  const stepLabel = over ? `Step ${maxSteps} of ${maxSteps} · step ${s.step} doesn't fit` : `Step ${s.step} of ${maxSteps}`;
   const keepScroll = $("#log")?.scrollTop, logAtEnd = !$("#log") || $("#log").scrollHeight - $("#log").scrollTop - $("#log").clientHeight < 30;
   page.innerHTML = `
     <div class="head">
@@ -576,34 +707,36 @@ function render() {
       ${s.network === "live" ? '<span class="badge live">💵 LIVE · real money</span>' : '<span class="badge paper">📝 PAPER</span>'}
       <span style="flex:1"></span>
       <div class="actions">
-        ${running ? `<button class="btn stop" data-act="stop">■ Stop</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
+        ${running ? `<button class="btn stop" data-act="stopmenu" aria-haspopup="menu">■ ${s.stop_after_win ? "Stop after win…" : "Stop"} ▾</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
         <button class="btn" data-act="reset" ${running ? "disabled" : ""} title="Fresh ladder at step 1, profit back to 0">↺ Reset</button>
         ${s.network === "live" ? "" : `<button class="btn" data-act="paper_reset" ${running ? "disabled" : ""} title="Fresh paper account with the Paper balance">🧾 Reset paper</button>`}
         <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>
       </div>
-      <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}</div>
+      <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the next win</b>' : ""}</div>
     </div>
     <div class="tiles">
       <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
-      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 Step ${s.step} of ${maxSteps}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
+      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
-      <div class="tile"><div class="k">🧮 Budget left</div><div class="v num">${money(s.budget_left)}</div></div>
+      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div></div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
     <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Martingale ladder <span class="sum" id="ladderSum"></span></h2>
-      <div class="body"><div class="ladder-tools">At price <input id="planPrice" value="${esc($("#planPrice")?.value || "0.50")}" inputmode="decimal"> per share <span class="muted" id="ladderNote"></span></div><div class="scroll" id="ladderTable"></div></div></section>
+      <div class="body"><div class="ladder-tools muted" id="ladderNote"></div><div class="scroll" id="ladderTable"></div></div></section>
     ${panel("historyPanel", "History", `${s.trade_count} bets`, historyTable(s.trades))}
+    ${panel("simPanel", "🎲 Simulation", "what these settings do over many bets", simPanelBody())}
     ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
   `;
-  for (const b of page.querySelectorAll("[data-act]")) b.onclick = () => doAct(b.dataset.act);
+  for (const b of page.querySelectorAll("[data-act]")) b.onclick = () => b.dataset.act === "stopmenu"
+    ? stopMenu(b, current, status.stop_after_win) : doAct(b.dataset.act);
   for (const h of page.querySelectorAll("[data-fold]")) h.onclick = () => {
     const id = h.dataset.fold; folded.has(id) ? folded.delete(id) : folded.add(id);
     localStorage.setItem("folded", JSON.stringify([...folded])); h.parentElement.classList.toggle("folded");
   };
-  $("#planPrice").addEventListener("input", schedulePreview);
+  wireSim();
   $("#saveKeys")?.addEventListener("click", saveKeys);
   $("#checkKeys")?.addEventListener("click", () => doAct("check"));
   const log = $("#log"); if (log) log.scrollTop = logAtEnd ? log.scrollHeight : keepScroll;
@@ -642,6 +775,14 @@ async function saveKeys() {
 }
 function toastOk(msg) { const t = $("#toast"); t.style.background = "var(--green-bg)"; t.style.color = "var(--green)"; t.style.borderColor = "var(--green)"; toast(msg); setTimeout(() => { t.style.background = t.style.color = t.style.borderColor = ""; }, 6000); }
 
+// while a bet runs: the market's chance for our side, big and coloured (green ahead, red behind), then both sides
+function winNow(side, mine, upChance) {
+  const p = Math.round(mine * 100), c = p > 50 ? "ahead" : p < 50 ? "behind" : "even";
+  const one = (sd, v) => `<span class="${sd === side ? "mine side-" + sd : "muted"}">${sd === "up" ? "📈 Up" : "📉 Down"} ${Math.round(v * 100)}%</span>`;
+  return `<div class="winnow ${c}"><div><div class="k">Win chance now (${side === "up" ? "Up" : "Down"})</div>
+      <div class="big num">${p}%</div></div>
+    <div class="both">${one("up", upChance)} · ${one("down", 1 - upChance)}<div class="chance"><b style="width:${(upChance * 100).toFixed(1)}%"></b></div></div></div>`;
+}
 function betPanel(s) {
   const b = s.bet;
   if (!b) return panel("betPanel", "Current bet", "none", `<p class="muted" style="margin:0">${esc(s.running ? s.message : "No open bet.")}</p>`);
@@ -656,19 +797,127 @@ function betPanel(s) {
       <div><div class="k">Cost (fee ${money(b.fee)})</div><div class="v num">${money(b.cost)}</div></div>
       <div><div class="k">A win pays</div><div class="v num pos">${money(b.shares)} <small>(${money(b.win_profit, true)})</small></div></div>
       <div><div class="k">${ended ? "Round ended" : "Ends in"}</div><div class="v num">${ended ? "⏳ result soon" : secs(b.ends_in)}</div></div>
+      <div><div class="k">Round volume${b.volume?.lagging ? " (Polymarket, delayed)" : b.volume?.partial ? ` since ${new Date(b.volume.since * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})}` : ""}</div>
+        <div class="v num">${b.volume == null ? "–" : money(b.volume.usd)}${b.volume?.trades ? ` <small class="muted" style="font-weight:400">${b.volume.trades.toLocaleString()} trades · ${sharesTxt(b.volume.shares)} sh</small>` : ""}</div></div>
     </div>
-    ${upChance == null || ended ? "" : `<div class="muted" style="margin-top:8px;font-size:12px">Market now: Up ${(upChance * 100).toFixed(0)}% · Down ${(100 - upChance * 100).toFixed(0)}%</div><div class="chance"><b style="width:${(upChance * 100).toFixed(1)}%"></b></div>`}`);
+    ${mid == null || ended ? "" : winNow(b.side, mid, upChance)}`);
+}
+// --- simulation (like the hyperliquid bot's): these settings over many bets in a fair market ---
+// The page is re-rendered every few seconds, so the inputs and the last result live here, not in the DOM.
+const simIn = {bets: "1000", runs: "1000", bankroll: "", win: ""};
+let simResult = null, simFor = "", simBusy = false, simLogOpen = true;
+const sgnMoney = v => money(v, true);
+const pctTxt = x => (x * 100 < 1 && x > 0 ? "<1" : x * 100 > 99 && x < 1 ? ">99" : Math.round(x * 100)) + "%";
+function simPanelBody() {
+  if (simFor !== current) { simResult = null; simFor = current; }
+  const inp = (k, label, ph) => `<div><label>${label}</label><input data-sim="${k}" value="${esc(simIn[k])}" placeholder="${ph}" inputmode="decimal"></div>`;
+  return `<div class="simhelp">Plays the ladder bet after bet, many times over. Every bet is bought at the ladder's price and, unless you set a
+      Win chance, wins as often as that price says (a fair market: 0.75 wins 75%). Fees, the 5-share minimum and the budget are included;
+      slippage is not, so real results are usually a little worse. A ladder end starts again at step 1 with the money left. Uses the
+      settings in the form, saved or not.</div>
+    <form class="simform" id="simForm">${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
+      ${inp("win", "Win chance (%)", "= price")}
+      <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? "Simulating…" : "Run simulation"}</button></form>
+    <div id="simOut" style="opacity:${simBusy && simResult ? .45 : 1}">${simResult ? simHtml(simResult) : ""}</div>`;
+}
+function wireSim() {
+  $(".simlog")?.addEventListener("toggle", e => { simLogOpen = e.target.open; });
+  const f = $("#simForm"); if (!f) return;
+  for (const el of f.querySelectorAll("[data-sim]")) el.addEventListener("input", () => { simIn[el.dataset.sim] = el.value; });
+  f.addEventListener("submit", async e => {
+    e.preventDefault();
+    simBusy = true; render();
+    try {
+      simResult = await api(`/api/bots/${current}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll,
+        win_chance: simIn.win, settings: formValues()});
+    } catch (err) { toast(err.message); }
+    simBusy = false; render();
+  });
+}
+function simHtml(r) {
+  const f = r.first_bet, pace = r.pace_per_day;
+  const days = pace ? ` · about ${Math.max(1, Math.round(r.bets / pace))} days at this bot's pace (${pace.toFixed(0)} bets/day)` : "";
+  const tile = (label, value, sub, c = "") => `<div><div class="label">${label}</div><div class="value num ${c}">${value}</div><div class="sub">${sub}</div></div>`;
+  const edge = r.p_win - r.break_even;
+  return `<div class="simhelp">${r.runs.toLocaleString()} runs of ${r.bets.toLocaleString()} bets from ${money(r.bankroll)}${days}.
+      Every bet at ${r.price.toFixed(2)}: wins ${(r.p_win * 100).toFixed(1)}% of the time, needs ${(r.break_even * 100).toFixed(1)}% to break even after fees
+      (<b class="${tone(edge)}">${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)} points</b>).
+      ${f ? `First bet: ${money(f.cost)}, a win ${sgnMoney(f.win)}, a loss ${sgnMoney(f.loss)}.` : "The budget can't pay for Steps to survive."}</div>
+    <div class="simstats">
+      ${tile("Average result", sgnMoney(r.average), `${sgnMoney(r.average / Math.max(1, r.bets_avg))} per bet`, tone(r.average))}
+      ${tile("Typical run (median)", sgnMoney(r.median), "half the runs did better, half worse", tone(r.median))}
+      ${tile("Bad case (worst 5%)", sgnMoney(r.p5), `1 run in 20 ended here or lower · worst ${sgnMoney(r.worst)}`, tone(r.p5))}
+      ${tile("Good case (best 5%)", sgnMoney(r.p95), `1 run in 20 ended here or higher · best ${sgnMoney(r.best)}`, tone(r.p95))}
+      ${tile("Runs ending in profit", pctTxt(r.profit_chance), "the rest ended at a loss")}
+      ${tile("Runs with a ladder end", pctTxt(r.ladder_end_chance), `${r.ladder_ends_avg.toFixed(1)} ladder ends per run on average`)}
+      ${tile("Runs that used up the budget", pctTxt(r.broke_chance), "step 1 no longer fit, the run stopped")}
+      ${tile("Longest losing streak", `${r.longest_streak_median} in a row`, `typical run (up to ${r.longest_streak_max}) · biggest drop ${money(-r.drawdown_median)}`)}
+    </div>
+    <div class="simcharts">
+      <div class="simchart"><h3>How the runs ended</h3><div class="simhelp">Runs by final P&amp;L after ${r.bets.toLocaleString()} bets: losses red, profits blue.</div>${histSVG(r)}</div>
+      <div class="simchart"><h3>5 sample runs</h3><div class="simhelp">P&amp;L bet by bet: slow climbs, sudden drops at each ladder end. A line stops where its budget ran out.</div>${pathsSVG(r)}</div>
+    </div>
+    ${simLogHtml(r)}`;
+}
+function simLogHtml(r) {
+  const L = r.log || [], shown = L.filter(t => !t.event).length;
+  if (!L.length) return "";
+  // the same columns as the bot's own History (no round, side or slippage: the simulation has none)
+  const rows = L.map(t => t.event
+    ? `<tr class="ev"><td colspan="11">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🛑 Ladder end: back to step 1"}</td></tr>`
+    : `<tr><td class="l num">${t.n}</td><td class="num">${t.step}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
+      <td class="num">${money(t.cost)}</td><td class="num neg">${money(-t.fee)}</td>
+      <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td><td class="num">${money(t.payout)}</td>
+      <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`).join("");
+  return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b></summary>
+    <div class="simhelp">The first ${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets of run 1, oldest first, as the simulation played them, with the ladder ends and the budget running out in between.</div>
+    <div class="scroll"><table><tr><th class="l">#</th><th>Step</th><th>Price</th><th>Shares</th><th>Cost</th><th>Fee</th><th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Budget left</th></tr>${rows}</table></div></details>`;
+}
+const SW = 560, SH = 220, SPL = 52, SPR = 8, SPT = 8, SPB = 26;   // chart box (SVG units)
+function niceTicks(lo, hi, n = 4) {
+  const span = hi - lo || 1, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const compactUsd = v => (v < 0 ? "-$" : "$") + (Math.abs(v) >= 1000 ? (Math.abs(v) / 1000).toFixed(Math.abs(v) >= 10000 ? 0 : 1) + "K" : Math.round(Math.abs(v)));
+function histSVG(r) {
+  const bins = r.histogram, maxC = Math.max(...bins.map(b => b.count));
+  const lo = bins[0].lo, hi = bins[bins.length - 1].hi || lo + 1;
+  const x = v => SPL + (v - lo) / ((hi - lo) || 1) * (SW - SPL - SPR), y = c => SPT + (1 - c / maxC) * (SH - SPT - SPB);
+  const bw = (SW - SPL - SPR) / bins.length;
+  let out = `<svg viewBox="0 0 ${SW} ${SH}" role="img" aria-label="Histogram of final profit and loss">`;
+  for (const t of niceTicks(0, maxC, 3)) out += `<line class="grid-line" x1="${SPL}" x2="${SW - SPR}" y1="${y(t)}" y2="${y(t)}"/><text x="${SPL - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
+  bins.forEach((b, i) => {
+    if (!b.count) return;
+    const w = Math.min(24, Math.max(1, bw - 2)), bx = SPL + i * bw + (bw - w) / 2, top = y(b.count);
+    out += `<rect class="${(b.lo + b.hi) / 2 < 0 ? "bar-loss" : "bar-gain"}" x="${bx}" y="${top}" width="${w}" height="${SH - SPB - top}"><title>${sgnMoney(b.lo)} to ${sgnMoney(b.hi)}: ${b.count} runs</title></rect>`;
+  });
+  if (lo < 0 && hi > 0) out += `<line class="zero" x1="${x(0)}" x2="${x(0)}" y1="${SPT}" y2="${SH - SPB}"/>`;
+  for (const t of niceTicks(lo, hi, 4)) out += `<text x="${x(t)}" y="${SH - 8}" text-anchor="middle">${compactUsd(t)}</text>`;
+  return out + `</svg>`;
+}
+function pathsSVG(r) {
+  const all = r.paths.flat(), lo = Math.min(0, ...all), hi = Math.max(0, ...all), n = Math.max(...r.paths.map(p => p.length));
+  const x = i => SPL + i / Math.max(1, n - 1) * (SW - SPL - SPR), y = v => SPT + (1 - (v - lo) / ((hi - lo) || 1)) * (SH - SPT - SPB);
+  let out = `<svg viewBox="0 0 ${SW} ${SH}" role="img" aria-label="Profit and loss of five sample runs, bet by bet">`;
+  for (const t of niceTicks(lo, hi, 4)) out += `<line class="${t === 0 ? "zero" : "grid-line"}" x1="${SPL}" x2="${SW - SPR}" y1="${y(t)}" y2="${y(t)}"/><text x="${SPL - 6}" y="${y(t) + 4}" text-anchor="end">${compactUsd(t)}</text>`;
+  for (const p of r.paths) out += `<polyline class="path" points="${p.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"/>`;
+  for (const t of niceTicks(0, (n - 1) * r.path_every, 4)) out += `<text x="${x(t / r.path_every)}" y="${SH - 8}" text-anchor="middle">${t ? "bet " + t.toLocaleString() : "0"}</text>`;
+  return out + `</svg>`;
 }
 function renderLadder() {
   const el = $("#ladderTable"); if (!el || !status) return;
-  const usePreview = preview && (formDirty || ($("#planPrice") && +$("#planPrice").value !== 0.5));
+  const usePreview = preview && formDirty;
   const view = usePreview ? preview : status.ladder;
   $("#ladderPanel").classList.toggle("preview", !!(usePreview && formDirty));
   if (view.error) { el.innerHTML = `<p class="neg">${esc(view.error)}</p>`; return; }
   $("#ladderSum").innerHTML = view.lost > 0
     ? `now at step ${view.step}: ${view.recover_wins > 1 ? "still to win back" : "this streak lost"} ${money(view.lost)}${view.recover_wins > 1 ? ` over ${view.wins_left} win${view.wins_left > 1 ? "s" : ""}` : ""} · ${view.fits} more bets fit in the ${money(view.left)} left`
     : `${view.fits} losses in a row fit in ${money(view.budget)}`;
-  $("#ladderNote").textContent = usePreview && formDirty ? "(preview of unsaved settings)" : "";
+  $("#ladderNote").textContent = `Every bet priced at ${(+view.price).toFixed(2)} per share, the most these settings pay` +
+    (usePreview ? " (preview of unsaved settings)" : "");
   const a = view.auto;
   const autoNote = !a ? "" : a.base == null
     ? `<p class="neg" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: the budget can't pay for ${a.steps} bets in a row even at 5 shares each.</p>`
@@ -698,6 +947,32 @@ function historyTable(rows) {
       <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td>
       <td class="num ${tone(t.total_pnl)}">${money(t.total_pnl, true)}</td><td class="num">${money(t.balance)}</td></tr>`).join("")}</table></div>`;
 }
+// the menu under Stop (like bcauto's): stop right away, or at the next winning bet (or call that off)
+function closeStopMenu() { $("#stopMenu")?.remove(); }
+function stopMenu(btn, id, afterWin) {
+  if ($("#stopMenu")?.dataset.for === id) return closeStopMenu();     // a second click closes it
+  closeStopMenu();
+  const m = document.createElement("div");
+  m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = id; m.setAttribute("role", "menu");
+  const items = [["stop", "■ Stop right away", "Now, even mid-ladder. An open bet is paid out when the bot runs again."],
+    afterWin ? ["cancel_after_win", "↩ Don't wait for a win", "Keep running"]
+             : ["stop_after_win", "🏁 Stop after a win", "Keep betting and stop at the next winning bet, back at step 1"]];
+  m.innerHTML = items.map(([a, t, h]) => `<button type="button" role="menuitem" data-a="${a}" title="${esc(h)}">${t}<small>${esc(h)}</small></button>`).join("");
+  document.body.append(m);
+  const r = btn.getBoundingClientRect();
+  m.style.minWidth = Math.max(r.width, 220) + "px";
+  m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + "px";
+  m.style.top = (r.bottom + 2 + m.offsetHeight < innerHeight ? r.bottom + 2 : r.top - 2 - m.offsetHeight) + "px";
+  m.onclick = async e => {
+    const a = e.target.closest("button")?.dataset.a; if (!a) return;
+    closeStopMenu();
+    try { const s = await api(`/api/bots/${id}/${a}`, {}); if (id === current && s?.settings) { status = s; render(); } }
+    catch (err) { toast(err.message); }
+    loadBots();
+  };
+}
+document.addEventListener("click", e => { if (!e.target.closest("#stopMenu, [data-act=stopmenu], .bi-act")) closeStopMenu(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeStopMenu(); });
 async function doAct(a) {
   const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset goes back to 0 (the history is kept).",
     paper_reset: `Reset the paper account to ${moneyFull(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
@@ -782,6 +1057,7 @@ $("#usersBtn").onclick = async () => {
     $("#usersBtn").hidden = !me.admin; $("#addEmail").hidden = !me.guest; $("#signOut").hidden = me.guest;
   }
   schema = await api("/api/schema");
+  wireBotOrder();
   await loadBots();
   buildForm();
   refresh();

@@ -43,3 +43,22 @@ class RoundResultTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VolumeFeedTest(unittest.TestCase):
+    def test_counts_trades_per_round(self):
+        import json
+        from poly_bot.volume import VolumeFeed
+        f = VolumeFeed(clock=lambda: 1000.0)
+        f._rounds["r1"] = {"usd": 0.0, "shares": 0.0, "trades": 0, "since": 990.0, "start": 1000.0, "end": 1300.0,
+                           "partial": False}
+        f._token_slug.update({"up1": "r1", "down1": "r1"})
+        f._handle(json.dumps([{"event_type": "last_trade_price", "asset_id": "up1", "price": "0.6", "size": "10"},
+                              {"event_type": "last_trade_price", "asset_id": "down1", "price": "0.4", "size": "5"},
+                              {"event_type": "book", "asset_id": "up1"},
+                              {"event_type": "last_trade_price", "asset_id": "other", "price": "0.5", "size": "99"}]))
+        f._handle("PONG")
+        v = f.volume("r1")
+        self.assertEqual((v["trades"], v["shares"]), (2, 15.0))
+        self.assertAlmostEqual(v["usd"], 8.0)
+        self.assertIsNone(f.volume("nope"))

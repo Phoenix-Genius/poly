@@ -215,18 +215,23 @@ class LiveClient:
         # From here on the order is filled: nothing may stop the bet being recorded, or the bot would buy again.
         got = float(resp.taking_amount)                 # shares received
         paid = float(resp.making_amount)                # pUSD for the shares
-        cost = paid
+        cost, seen = paid, False
         try:
             after = self.pusd()
             self._balance_cache = (after, time.time())
             spent = before - after
             if paid - 0.01 <= spent <= paid * 1.2 + 0.05:   # all-in (fee included), if the balance agrees
-                cost = spent
+                cost, seen = spent, True
         except Exception as e:  # noqa: BLE001
             self.log.warning("Couldn't read the balance after the bet (%s); using the order's $%.2f", e, paid)
-        fee = max(0.0, cost - paid) + max(0.0, shares - got) * (paid / got if got else 0)
-        if fee < 0.005 and got:           # not visible in this fill: show Polymarket's documented fee for it
-            fee = got * fee_per_share(paid / got, r.fee_rate, r.fee_exponent)
+        # Polymarket's documented taker fee; on these rounds it comes out of the pUSD on top of the order (checked
+        # against the wallet balance on every live bet so far). The order's shares can be a little under what was
+        # asked just from rounding the amount, so a short fill is not a fee.
+        fee = got * fee_per_share(paid / got, r.fee_rate, r.fee_exponent) if got else 0.0
+        if seen and cost - paid >= 0.005:
+            fee = cost - paid             # the balance shows the real fee
+        elif not seen:                    # the balance hadn't caught up yet: count the fee, or the profit
+            cost = paid + fee             # runs ahead of the wallet
         fill = Fill(round(got, 6), paid / got if got else 0.0, round(cost, 6), round(fee, 6))
         with self._lock:
             pos = self.data["positions"].setdefault(r.slug, {"side": side, "shares": 0.0, "cost": 0.0,

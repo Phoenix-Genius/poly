@@ -238,3 +238,72 @@ class RecoverOverWinsTest(unittest.TestCase):
         c = self.cfg(recover_wins=2)
         self.assertEqual(shares_for_book(c, 3, 100, [(0.5, 1e6)], 0.55), shares_for(c, 3, 100, 0.5))
         self.assertEqual(shares_for(c, 1, 100, 0.5, wins_left=1), shares_for(self.cfg(), 1, 100, 0.5))
+
+
+class HitModeTest(unittest.TestCase):
+    def test_hit_side(self):
+        from poly_bot.config import BotConfig
+        from poly_bot.strategy import buy_cap, entry_window, hit_side, plan_price
+        cfg = BotConfig(".", entry_mode="hit", hit_price=0.75, hit_max_price=0.8)
+        self.assertEqual(hit_side(cfg, {"up": 0.75, "down": 0.26}), ("up", ""))
+        self.assertEqual(hit_side(cfg, {"up": 0.3, "down": 0.71})[0], None)
+        self.assertEqual(hit_side(cfg, {"up": 0.85, "down": 0.16})[0], None)
+        self.assertEqual(hit_side(cfg, {"up": None, "down": 0.78}), ("down", ""))
+        self.assertEqual((buy_cap(cfg), plan_price(cfg)), (0.8, 0.8))
+        self.assertEqual(entry_window("5m", 0, hit=True), 295)
+        side = BotConfig(".")
+        self.assertEqual((buy_cap(side), plan_price(side)), (side.max_price, side.max_price))
+        with self.assertRaises(ValueError):
+            BotConfig(".", entry_mode="hit", hit_price=0.8, hit_max_price=0.75).validate()
+        free = BotConfig(".", entry_mode="hit")              # Pay at most empty = no limit
+        free.validate()
+        self.assertEqual((buy_cap(free), plan_price(free)), (0.99, 0.75))
+        self.assertEqual(hit_side(free, {"up": 0.93, "down": 0.08}), ("up", ""))
+
+
+class TimeModeTest(unittest.TestCase):
+    def test_leader_side_and_prices(self):
+        from poly_bot.config import BotConfig
+        from poly_bot.strategy import buy_cap, entry_span, leader_side, plan_price
+        cfg = BotConfig(".", entry_mode="time", time_left_sec=120)
+        self.assertEqual(entry_span(cfg, 300), (180, 295))
+        self.assertEqual(leader_side(cfg, {"up": 0.3, "down": 0.71}), ("down", ""))
+        self.assertIsNone(leader_side(cfg, {"up": 0.5, "down": 0.5})[0])
+        self.assertEqual((buy_cap(cfg), plan_price(cfg)), (0.99, 0.75))
+        capped = BotConfig(".", entry_mode="time", time_min_price=0.6, hit_max_price=0.9)
+        self.assertEqual(plan_price(capped), 0.9)
+        self.assertIsNone(leader_side(capped, {"up": 0.95, "down": 0.06})[0])
+        with self.assertRaises(ValueError):
+            BotConfig(".", entry_mode="time", time_min_price=0.9, hit_max_price=0.8).validate()
+
+
+class SimulateTest(unittest.TestCase):
+    def test_fair_market_loses_about_the_fee(self):
+        from poly_bot.simulate import simulate
+        cfg = BotConfig(".", base_profit_usd=1, max_steps=3, on_ladder_end="reset")
+        r = simulate(cfg, 0.5, 1000, bets=500, runs=400, seed=7)
+        self.assertEqual(r["runs"], 400)
+        self.assertAlmostEqual(r["break_even"], 0.5 + 0.07 * 0.25)
+        self.assertLess(r["average"], 0)                     # fair coin + fees: loses on average
+        self.assertLessEqual(max(t["step"] for t in r["log"] if not t.get("event")), 3)   # Max losses in a row
+        self.assertGreater(r["ladder_ends_avg"], 0)
+        self.assertEqual(sum(b["count"] for b in r["histogram"]), 400)
+        self.assertTrue(all(not t.get("event") or t["event"] in ("ladder_end", "broke") for t in r["log"]))
+
+    def test_sure_win_and_sure_loss(self):
+        from poly_bot.simulate import simulate
+        cfg = BotConfig(".", base_profit_usd=1)
+        win = simulate(cfg, 0.5, 100, bets=50, runs=3, win_chance=1.0, seed=1)
+        self.assertEqual(win["profit_chance"], 1.0)
+        self.assertGreaterEqual(win["median"], 50 * 1 - 0.5)  # every bet a win of at least the Profit per win
+        lose = simulate(cfg, 0.5, 100, bets=50, runs=3, win_chance=0.0, seed=1)
+        self.assertEqual(lose["broke_chance"], 1.0)          # losing every bet uses up the budget
+        self.assertGreater(lose["p5"], -100.01)
+
+    def test_limits(self):
+        from poly_bot.simulate import simulate
+        cfg = BotConfig(".")
+        with self.assertRaises(ValueError):
+            simulate(cfg, 0.5, 100, bets=10_000, runs=10_000)
+        with self.assertRaises(ValueError):
+            simulate(cfg, 0.5, 0)

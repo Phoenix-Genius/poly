@@ -24,6 +24,46 @@ class AppTest(unittest.TestCase):
                 c.lock.close()
         self.tmp.cleanup()
 
+    def test_order_and_pins(self):
+        for coin in ("BTC", "ETH", "SOL"):
+            self.app.create({"coin": coin, "timeframe": "5m"})
+        ids = lambda: [b["id"] for b in self.app.list()["bots"]]   # noqa: E731
+        self.assertEqual(ids(), ["btc-5m", "eth-5m", "sol-5m"])     # oldest first
+        self.app.set_order({"order": ["sol-5m", "btc-5m", "nope"]})
+        self.assertEqual(ids(), ["sol-5m", "btc-5m", "eth-5m"])     # unknown dropped, missing kept at the end
+        d = self.app.pin("eth-5m", {"pinned": True})
+        self.assertEqual([(b["id"], b["pinned"]) for b in d["bots"]][0], ("eth-5m", True))   # pinned first
+        self.app.pin("eth-5m", {"pinned": False})
+        self.assertEqual(ids(), ["sol-5m", "btc-5m", "eth-5m"])
+        self.app.delete("btc-5m")
+        self.assertEqual(ids(), ["sol-5m", "eth-5m"])
+        saved = json.loads((Path(self.tmp.name) / "profiles" / ".order.json").read_text())
+        self.assertEqual(saved["order"], ["sol-5m", "eth-5m"])
+
+    def test_stop_after_win_endpoints(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        with self.assertRaises(ValueError):
+            ctl.stop_after_win()                                  # not running
+        ctl.start()
+        self.assertTrue(ctl.stop_after_win()["stop_after_win"])
+        self.assertFalse(ctl.cancel_after_win()["stop_after_win"])
+        ctl.stop_after_win()
+        ctl.stop()
+        ctl.bot.halted, ctl.bot.halt_message = "after_win", "Stopped after a win"
+        s = ctl.status()
+        self.assertEqual((s["halted"], s["phase"]), ("", "idle"))  # an asked-for stop isn't shown as a halt
+
+    def test_simulate_uses_form_settings_and_budget(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        r = ctl.simulate({"bets": 200, "runs": 50, "settings": {"entry_mode": "hit", "hit_price": 0.75}})
+        self.assertEqual((r["bets"], r["runs"], r["price"], r["bankroll"]), (200, 50, 0.75, 1000))
+        self.assertAlmostEqual(r["p_win"], 0.75)                 # fair market by default
+        r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "win_chance": "80"})
+        self.assertEqual((r["bankroll"], r["p_win"], r["price"]), (300, 0.8, ctl.cfg.max_price))
+        self.assertEqual(ctl.cfg.entry_mode, "side")             # simulate doesn't save
+
     def test_create_status_plan_delete(self):
         d = self.app.create({"coin": "ETH", "timeframe": "15m"})
         self.assertEqual(d["id"], "eth-15m")

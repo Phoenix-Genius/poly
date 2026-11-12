@@ -77,6 +77,7 @@ class Round:
     fee_exponent: float = 1.0
     min_size: float = 5.0
     condition_id: str = ""        # the market's id on chain; live trading redeems winnings with it
+    volume: float = 0.0           # USDC traded in this round so far (Gamma; lags the trades by a little)
 
     def token(self, side: str) -> str:
         return self.up_token if side == "up" else self.down_token
@@ -113,6 +114,7 @@ def parse_round(event: dict) -> Round:
         fee_exponent=float(fees.get("exponent", 1.0)),
         min_size=float(m.get("orderMinSize") or 5),
         condition_id=m.get("conditionId") or "",
+        volume=float(m.get("volumeNum") or m.get("volume") or event.get("volume") or 0),
     )
 
 
@@ -124,6 +126,8 @@ class Polymarket:
         self._series: dict[tuple, Optional[str]] = {}
         self._results: dict[str, str] = {}       # slug -> result, final once known
         self._lock = threading.Lock()
+        from .volume import VolumeFeed
+        self.volumes = VolumeFeed(clock)         # real-time traded volume per round (one socket for every bot)
 
     def series_id(self, coin: str, timeframe: str) -> str:
         key = (coin.upper(), timeframe)

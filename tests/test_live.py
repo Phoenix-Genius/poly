@@ -119,6 +119,19 @@ class LiveClientTest(unittest.TestCase):
         saved = json.loads((self.dir / "live-account.json").read_text())
         self.assertIn(self.round().slug, saved["positions"])
 
+    def test_fee_counted_when_balance_lags(self):
+        c = LiveClient(self.dir, self.pm, self.sdk)
+        real = self.sdk.place_market_order
+        def lagging(**kw):                 # the balance read right after the order still shows the old amount
+            before = self.sdk.pusd
+            resp = real(**kw)
+            self.sdk.pusd, self.lagged = before, self.sdk.pusd
+            return resp
+        self.sdk.place_market_order = lagging
+        fill = c.buy(self.round(), "up", 10, 0.6)
+        self.assertAlmostEqual(fill.cost, 5 + 10 * 0.0175, places=4)       # fee counted though the balance lagged
+        self.assertAlmostEqual(fill.cost, 100 - self.lagged, places=4)
+
     def test_fee_taken_in_shares(self):
         self.sdk.fee_in_usd = False
         c = LiveClient(self.dir, self.pm, self.sdk)

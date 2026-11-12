@@ -57,6 +57,19 @@ class EngineTest(unittest.TestCase):
         self.assertEqual([r["step"] for r in rows], ["1", "2", "3"])
         self.assertGreater(lost, 8)
 
+    def test_stop_after_win(self):
+        bot = self.make()
+        bot.stop_after_win = True
+        self.play(bot, "down")                       # a loss: keeps going
+        self.assertEqual(bot.halted, "")
+        self.play(bot, "up")                         # the win: stops, back at step 1, flag cleared
+        self.assertEqual(bot.halted, "after_win")
+        self.assertEqual(bot.ladder.step, 1)
+        self.assertFalse(bot.stop_after_win)
+        bot.on_start()                               # a plain Start, no Reset needed
+        self.assertEqual(bot.halted, "")
+        self.assertTrue(json.loads(bot.state_path.read_text()).get("stop_after_win") is False)
+
     def test_one_bet_per_round(self):
         bot = self.make()
         self.clock.t += 5
@@ -87,6 +100,65 @@ class EngineTest(unittest.TestCase):
         self.pm.prices["up"] = 0.55
         bot.tick()
         self.assertIsNotNone(bot.bet)
+
+    def test_hit_mode_buys_first_side_to_reach_hit_price(self):
+        self.pm.prices.update(up=0.52, down=0.49)
+        bot = self.make(entry_mode="hit", hit_price=0.75, hit_max_price=0.80)
+        self.clock.t += 5
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("Waiting for a side to reach 0.75", bot.message)
+        self.clock.t += 200                         # past the normal entry window: hit mode watches the whole round
+        self.pm.prices.update(up=0.24, down=0.77)
+        bot.tick()
+        self.assertIsNotNone(bot.bet, bot.message)
+        self.assertEqual(bot.bet["side"], "down")   # side_mode up_only is ignored in hit mode
+        self.assertAlmostEqual(bot.bet["price"], 0.77)
+        # recover sizing at 0.77: one win pays the Profit per win after fees
+        win = bot.bet["shares"] - bot.bet["cost"]
+        self.assertGreaterEqual(win, 2.5 - 0.01)
+
+    def test_hit_mode_waits_when_price_jumped_past_cap(self):
+        self.pm.prices.update(up=0.90, down=0.11)
+        bot = self.make(entry_mode="hit", hit_price=0.75, hit_max_price=0.80)
+        self.clock.t += 5
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("above Pay at most 0.80", bot.message)
+        self.pm.prices.update(up=0.79, down=0.22)
+        bot.tick()
+        self.assertEqual(bot.bet["side"], "up")
+
+    def test_time_mode_buys_leader_when_time_left(self):
+        self.pm.prices.update(up=0.40, down=0.61)
+        bot = self.make(entry_mode="time", time_left_sec=120)
+        self.clock.t += 60
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("Waiting until 2m 00s are left", bot.message)
+        self.clock.t += 125                          # 185 s in: 115 s left
+        bot.tick()
+        self.assertEqual(bot.bet["side"], "down")    # the leader; side_mode up_only is ignored
+        self.assertAlmostEqual(bot.bet["price"], 0.61)
+
+    def test_time_mode_leader_price_limits(self):
+        self.pm.prices.update(up=0.55, down=0.46)
+        bot = self.make(entry_mode="time", time_left_sec=120, time_min_price=0.60, hit_max_price=0.90)
+        self.clock.t += 185
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("below Leader at least 0.60", bot.message)
+        self.pm.prices.update(up=0.95, down=0.06)
+        bot.tick()
+        self.assertIn("above Pay at most 0.90", bot.message)
+        self.pm.prices.update(up=0.70, down=0.31)
+        bot.tick()
+        self.assertEqual(bot.bet["side"], "up")
+        self.clock.t = 1_800_000_300 + 296           # next round, 4 s before its end: too late
+        bot.bet, bot.done_round = None, ""
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("Too late", bot.message)
 
     def test_price_below_min_waits(self):
         self.pm.prices["up"] = 0.2

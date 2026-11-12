@@ -160,6 +160,20 @@ The legacy `py-clob-client` is superseded: don't use it.
   optional (to keep bots across browsers, and for admins). A guest signing in with an email that already has an
   account has their bots moved (and kept running) into it. Open risk: an abandoned guest's live bot keeps trading
   with nobody able to stop it except the admin.
+- **Profit is after fees, always (2026-11-13):** "show after fee plz. only real profit plz." Every profit figure
+  (tile, history Net/Total, Until earn, the streak to win back) must match the wallet. Live fees come out of the
+  pUSD on top of the order and the balance read right after an order is often stale: never record a live cost
+  without the fee.
+- **Bet modes (2026-11-13):** side (as before), **hit** (first side to reach a price, default 0.75) and **time**
+  (the leader with N seconds left, default 120). The owner wanted them as separate modes, not as extra options on
+  side mode. Backtests shown to the owner (7 days of BTC 5m, 1-minute prices): a side first at 0.70-0.80 won 76.9%
+  vs ~76% needed (about break-even); a leader above 0.90 with ~2 min left is fairly priced; a leader at 0.60-0.70
+  with ~2 min left won ~74% vs ~67% needed (small sample, untested on paper yet). Pay at most empty = no limit.
+- **UI choices (2026-11-13):** no "At price" box on the ladder (it prices at the dearest the settings pay);
+  Simulation panel after History, with a run-1 history table; Bet mode tile instead of Budget left; Stop menu
+  "right away / after a win" like bcauto; bot list drag + pin like hyperliquid; round volume must be real time
+  (Gamma's lags: use the CLOB WebSocket, `volume.py`).
+- **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13).
 - **Open questions:** Telegram/Google Sheet notifications like hyperliquid;
   translations; a backtest over past rounds; whether to settle early from the closing price instead of waiting
   1-5 min for the official result (would let 5m bots bet every round).

@@ -39,9 +39,72 @@ def floor2(x: float) -> float:
     return math.floor(round(x * 100, 6)) / 100
 
 
-def entry_window(timeframe: str, setting: int) -> float:
-    """Seconds after a round's start during which the bot may still bet (0 = auto: the first third)."""
-    return float(setting) if setting > 0 else ROUND_SECONDS[timeframe] / 3
+def entry_window(timeframe: str, setting: int, hit: bool = False) -> float:
+    """Seconds after a round's start during which the bot may still bet (0 = auto: the first third, or the whole
+    round in hit mode)."""
+    if setting > 0:
+        return float(setting)
+    return ROUND_SECONDS[timeframe] - 5 if hit else ROUND_SECONDS[timeframe] / 3
+
+
+def mode(cfg) -> str:
+    return getattr(cfg, "entry_mode", "side")
+
+
+def entry_span(cfg, length: float) -> tuple[float, float]:
+    """(open, close): seconds after a round's start between which the bot may bet. time mode: from Time left
+    before the end to 5 s before it; else from the start through the Entry window."""
+    if mode(cfg) == "time":
+        return max(0.0, length - cfg.time_left_sec), length - 5
+    return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec, mode(cfg) == "hit")
+
+
+def buy_cap(cfg) -> float:
+    """The most the bot pays per share: Max price, or Pay at most in hit and time mode (0 = no limit: 0.99)."""
+    if mode(cfg) in ("hit", "time"):
+        return cfg.hit_max_price or 0.99
+    return cfg.max_price
+
+
+def plan_price(cfg) -> float:
+    """The price the ladder table assumes, the dearest the bot's settings let it pay: the Max price, or Pay at most
+    in hit and time mode. With no limit: the Hit price (hit), or Leader at least / 0.75 (time)."""
+    if mode(cfg) == "hit":
+        return cfg.hit_max_price or cfg.hit_price
+    if mode(cfg) == "time":
+        return cfg.hit_max_price or cfg.time_min_price or 0.75
+    return cfg.max_price
+
+
+def leader_side(cfg, prices: dict) -> tuple[Optional[str], str]:
+    """time mode: (side, "") for the leading side (the dearer best ask) when its price is within Leader at least and
+    Pay at most, else (None, why)."""
+    up, down = prices.get("up"), prices.get("down")
+    show = " / ".join(f"{s.upper()} {p:.2f}" for s, p in sorted(prices.items()) if p is not None) or "no prices"
+    if up is None or down is None or abs(up - down) < 1e-9:
+        return None, f"no clear leader ({show})"
+    side = "up" if up > down else "down"
+    p = prices[side]
+    if p < cfg.time_min_price - 1e-9:
+        return None, f"{side.upper()} leads at {p:.2f}, below Leader at least {cfg.time_min_price:.2f}"
+    if p > buy_cap(cfg) + 1e-9:
+        return None, f"{side.upper()} leads at {p:.2f}, above Pay at most {buy_cap(cfg):.2f}"
+    return side, ""
+
+
+def hit_side(cfg, prices: dict) -> tuple[Optional[str], str]:
+    """hit mode: (side, "") for the side whose best ask is between the Hit price and Pay at most, else (None, why).
+    Both sides can't sensibly be at 0.75+ at once; if they are, the dearer one is the market's favourite."""
+    cap = buy_cap(cfg)
+    ok = [(p, s) for s, p in prices.items() if p is not None and cfg.hit_price - 1e-9 <= p <= cap + 1e-9]
+    if ok:
+        return max(ok)[1], ""
+    over = [(p, s) for s, p in prices.items() if p is not None and p > cap + 1e-9]
+    if over:
+        p, s = max(over)
+        return None, f"{s.upper()} is at {p:.2f}, above Pay at most {cap:.2f}"
+    show = " / ".join(f"{s.upper()} {p:.2f}" for s, p in sorted(prices.items()) if p is not None) or "no prices"
+    return None, f"no side at {cfg.hit_price:.2f} yet ({show})"
 
 
 @dataclass
@@ -286,7 +349,7 @@ def streak_sizing(cfg, step: int, base: float, budget: float, carried: bool = Fa
     if not cfg.target_steps:
         return cfg, 0.0
     if (step == 1 and not carried) or not base:     # carried: a debt still being won back keeps its streak's base
-        base = base_for_steps(cfg, cfg.target_steps, cfg.max_price, budget)
+        base = base_for_steps(cfg, cfg.target_steps, buy_cap(cfg), budget)
         if base is None:
             return None, 0.0
     return with_base(cfg, base), base

@@ -73,6 +73,26 @@ FIELDS: dict[str, tuple] = {
                       "What to do after max losses in a row, or when the budget can't pay the next bet. "
                       "stop = halt the bot (you press Reset). reset = accept the loss and restart at step 1."),
     # --- side -------------------------------------------------------------------------------------------
+    "entry_mode": ("side", "select", ["side", "hit", "time"], "Bet mode",
+                   "side = pick a side by the Side mode and buy it near 50 cents early in the round (Min/Max price, "
+                   "Entry window). hit = no side choice: watch both sides and buy whichever first reaches the Hit "
+                   "price (e.g. 0.75), any time in the round. time = when Time left is reached (e.g. 120 s before "
+                   "the end), buy the side that is leading (the dearer one). A higher price wins more often but "
+                   "pays less: at 0.75 a win pays about 0.24 per share and a loss costs about 0.76, so it has to "
+                   "win about 77% to break even, and each martingale step costs about 4x the last."),
+    "hit_price": (0.75, "number", None, "Hit price",
+                  "hit mode: buy the first side whose price reaches this, e.g. 0.75 = 75 cents."),
+    "hit_max_price": (0.0, "number", None, "Pay at most",
+                      "hit and time mode: never pay more than this per share, e.g. 0.80. If the side is dearer, the "
+                      "bot waits for its price to come back within it. Empty (or 0) = no limit: buy at whatever the "
+                      "price is when the bot sees it (up to 0.99)."),
+    "time_left_sec": (120, "int", None, "Time left (s)",
+                      "time mode: bet when this many seconds are left in the round, e.g. 120 = 2 minutes before the "
+                      "end. If the leader's price isn't within Leader at least / Pay at most then, the bot keeps "
+                      "checking until 5 s before the end."),
+    "time_min_price": (0.0, "number", None, "Leader at least",
+                       "time mode: bet only if the leading side costs at least this, e.g. 0.60 (it leads clearly). "
+                       "Empty (or 0) = any lead."),
     "side_mode": ("alternate", "select", SIDE_MODES, "Side mode",
                   "alternate = Up, Down, Up, Down... follow_last = bet what the last finished round was "
                   "(momentum). opposite_last = bet against it. cheaper = the side with the lower price. "
@@ -142,6 +162,14 @@ class BotConfig:
         return self.bot_name.strip() or f"{self.coin} {self.timeframe}"
 
     @property
+    def hit_mode(self) -> bool:
+        return self.entry_mode == "hit"
+
+    @property
+    def time_mode(self) -> bool:
+        return self.entry_mode == "time"
+
+    @property
     def is_live(self) -> bool:
         return self.network == "live"
 
@@ -160,7 +188,7 @@ class BotConfig:
             raise ValueError("Bot name: 40 characters at most")
         if self.paper_balance_usd <= 0:
             raise ValueError("Paper balance must be more than 0")
-        for key in ("budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec"):
+        for key in ("budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "time_min_price"):
             if getattr(self, key) < 0:
                 raise ValueError(f"{FIELDS[key][3]} can't be negative")
         if self.base_profit_usd <= 0:
@@ -173,6 +201,18 @@ class BotConfig:
             raise ValueError("Max price must be between 0.02 and 0.98")
         if not (0 <= self.min_price < self.max_price):
             raise ValueError("Min price must be 0 or more and below the max price")
+        if not (0.05 <= self.hit_price <= 0.98):
+            raise ValueError("Hit price must be between 0.05 and 0.98")
+        if self.hit_max_price and not (0.02 <= self.hit_max_price <= 0.99):
+            raise ValueError("Pay at most must be between 0.02 and 0.99, or empty for no limit")
+        if self.entry_mode == "hit" and self.hit_max_price and self.hit_max_price < self.hit_price:
+            raise ValueError("Pay at most must be at least the Hit price, or empty for no limit")
+        if self.time_left_sec < 10:
+            raise ValueError("Time left must be at least 10 seconds")
+        if self.time_min_price > 0.98:
+            raise ValueError("Leader at least must be 0.98 or less")
+        if self.entry_mode == "time" and self.hit_max_price and self.time_min_price > self.hit_max_price:
+            raise ValueError("Leader at least is above Pay at most")
         if not (1 <= self.recover_wins <= 5):
             raise ValueError("Recover over (wins) must be between 1 and 5")
         if not (0 <= self.target_steps <= 30):

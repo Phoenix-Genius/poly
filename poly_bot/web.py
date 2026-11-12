@@ -28,7 +28,8 @@ from .instance import PROFILES_DIR, ROOT, AlreadyRunning, acquire_lock, bot_ids,
 from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
-from .strategy import build_ladder, steps_that_fit, streak_sizing
+from .simulate import simulate
+from .strategy import build_ladder, buy_cap, plan_price, steps_that_fit, streak_sizing
 from .trades import read_trades
 
 log = logging.getLogger("poly")
@@ -164,6 +165,24 @@ class Controller:
             self.log.info("Stopped with a bet open on %s; it's paid out when the bot runs again", self.bot.bet["title"])
         return self.status()
 
+    def stop_after_win(self) -> dict:
+        """Stop at the next winning bet (the bot halts itself as "after_win")."""
+        self._check_owned()
+        if not self.running:
+            raise ValueError("The bot isn't running.")
+        self.bot.stop_after_win = True
+        self.bot.save()
+        self.log.info("Stop after a win: the bot stops at its next winning bet")
+        return self.status()
+
+    def cancel_after_win(self) -> dict:
+        self._check_owned()
+        if self.bot.stop_after_win:
+            self.bot.stop_after_win = False
+            self.bot.save()
+            self.log.info("No longer stopping after a win")
+        return self.status()
+
     def reset(self) -> dict:
         self._check_owned()
         if self.running:
@@ -229,13 +248,33 @@ class Controller:
         values = {**self.cfg.settings(), **{k: v for k, v in body.items() if k in FIELDS}}
         cfg = BotConfig(self.folder, **values)
         cfg.validate()
-        price = float(body.get("price") or 0.5)
+        price = float(body.get("price") or plan_price(cfg))
         if not 0.02 <= price <= 0.98:
             raise ValueError("Price must be between 0.02 and 0.98")
         lad = self.bot.ladder
         if body.get("from_now"):      # the current streak with these settings; else a fresh ladder from step 1
             return self._ladder(cfg, price, lad.step, lad.base if cfg.target_steps == self.cfg.target_steps else 0)
         return self._ladder(cfg, price, 1, 0.0, fresh=True)
+
+    def simulate(self, body: dict) -> dict:
+        """These settings (the form's, saved or not) over many bets in a fair market. See simulate.py."""
+        values = {**self.cfg.settings(), **{k: v for k, v in (body.get("settings") or {}).items() if k in FIELDS}}
+        cfg = BotConfig(self.folder, **values)
+        cfg.validate()
+        try:
+            bankroll = float(body.get("bankroll") or 0)
+            bets, runs = int(body.get("bets") or 1000), int(body.get("runs") or 1000)
+            chance = body.get("win_chance")
+            chance = None if chance in (None, "") else float(chance) / 100
+        except (TypeError, ValueError):
+            raise ValueError("Bets, runs, budget and win chance must be numbers")
+        if bankroll <= 0:
+            bankroll = self._budget(cfg)
+        out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, chance)
+        out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
+        self.log.info("Simulated %d runs x %d bets from $%.2f at %.2f: average %+.2f, %.0f%% end in profit", runs,
+                      bets, bankroll, out["price"], out["average"], out["profit_chance"] * 100)
+        return out
 
     def _ladder(self, cfg: BotConfig, price: float, step: int, base: float, fresh: bool = False) -> dict:
         """ladder_view for the current streak (or a fresh one at step 1), with Steps to survive worked out."""
@@ -248,7 +287,7 @@ class Controller:
         view["recover_wins"] = cfg.recover_wins if cfg.sizing == "recover" else 1
         view["wins_left"] = (wins_left or view["recover_wins"]) if lost > 0 else 0
         view["auto"] = None if not cfg.target_steps else {
-            "steps": cfg.target_steps, "base": base if sizing else None, "price": cfg.max_price,
+            "steps": cfg.target_steps, "base": base if sizing else None, "price": buy_cap(cfg),
             "label": "Profit per win" if cfg.sizing == "recover" else "Starting bet"}
         return view
 
@@ -263,18 +302,20 @@ class Controller:
         """The bot list's card. full=False: only what status() repeats anyway (no balance or ladder work)."""
         b = self.bot
         out = {"id": self.id, "name": self.cfg.display_name, "coin": self.cfg.coin, "timeframe": self.cfg.timeframe,
-               "network": self.cfg.network, "running": self.running, "halted": b.halted, "step": b.ladder.step,
+               "network": self.cfg.network, "running": self.running,
+               "halted": "" if b.halted == "after_win" else b.halted,     # a stop you asked for isn't a halt
+               "stop_after_win": b.stop_after_win and self.running, "step": b.ladder.step,
                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses}
         if full:
             phase, message = self._phase()
             bal = self.balance()
             try:
-                lad = self._ladder(self.cfg, 0.5, b.ladder.step, b.ladder.base)
+                lad = self._ladder(self.cfg, plan_price(self.cfg), b.ladder.step, b.ladder.base)
                 nxt = next((r for r in lad["rows"] if r["step"] == b.ladder.step and not r.get("played")), None)
-                fits, next_cost = max(lad["fits"] + b.ladder.step - 1, b.ladder.step), nxt["cost"] if nxt else None
+                fits, next_cost = lad["fits"] + b.ladder.step - 1, nxt["cost"] if nxt else None   # steps the budget reaches, lost ones included
             except Exception:                 # a card must never fail the whole list
-                fits, next_cost = b.ladder.step, None
+                fits, next_cost = None, None
             out.update(phase=phase, message=message, balance=None if bal is None else round(bal, 2), fits=fits,
                        next_cost=next_cost, bet_cost=round(b.bet["cost"], 2) if b.bet else None)
         return out
@@ -283,6 +324,8 @@ class Controller:
         b = self.bot
         if self.running:
             return b.phase, b.message
+        if b.halted == "after_win":
+            return "idle", b.halt_message
         if b.halted:
             return "halted", b.halt_message
         return "idle", "Stopped. A bet is open; it's paid out when you Start." if b.bet else "Stopped"
@@ -294,6 +337,7 @@ class Controller:
             bet = {k: b.bet.get(k) for k in ("slug", "title", "side", "step", "shares", "price", "cost", "fee",
                                               "start", "end", "url")}
             bet["mid"] = b.live.get("mid")
+            bet["volume"] = b.live.get("volume")
             bet["ends_in"] = max(0, b.bet["end"] - now)
             bet["win_profit"] = round(b.bet["shares"] - b.bet["cost"], 2)
         phase, message = self._phase()
@@ -313,7 +357,7 @@ class Controller:
             "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",
-            "ladder": self._ladder(self.cfg, 0.5, b.ladder.step, b.ladder.base),
+            "ladder": self._ladder(self.cfg, plan_price(self.cfg), b.ladder.step, b.ladder.base),
             "trades": list(reversed(trades[-100:])),
             "trade_count": len(trades),
             "log": list(self.lines.lines)[-150:],
@@ -357,6 +401,7 @@ class App:
     def __init__(self, profiles: Path = PROFILES_DIR, pm: Polymarket = PM, prefix: str = ""):
         self.profiles, self.pm, self.prefix = profiles, pm, prefix
         self.controllers: dict[str, Controller] = {}
+        self._order_lock = threading.Lock()
         self.profiles.mkdir(parents=True, exist_ok=True)
         for bot_id in bot_ids(self.profiles):
             try:
@@ -371,8 +416,54 @@ class App:
         return self.controllers[bot_id]
 
     def list(self) -> dict:
-        return {"bots": [c.summary(full=True) for c in self.controllers.values()], "version": __version__,
-                "started": STARTED}
+        """Every bot: pinned ones first, each group in the order dragged into (see order())."""
+        order, pins = self.order()
+        rank = {i: n for n, i in enumerate(order)}
+        bots = [{**c.summary(full=True), "pinned": c.id in pins} for c in self.controllers.values()]
+        bots.sort(key=lambda b: (not b["pinned"], rank.get(b["id"], len(rank))))
+        return {"bots": bots, "version": __version__, "started": STARTED}
+
+    # --- list order and pins (like the hyperliquid bot): profiles/.order.json, shared by every browser ---------
+    def _read_order(self) -> tuple[list, list]:
+        try:
+            data = json.loads((self.profiles / ORDER_FILE).read_text())
+            return list(data.get("order") or []), list(data.get("pinned") or [])
+        except (OSError, ValueError, AttributeError):
+            return [], []
+
+    def _write_order(self, order: list, pinned: list) -> None:
+        write_json(self.profiles / ORDER_FILE, {"order": order, "pinned": pinned})
+
+    def order(self) -> tuple[list, list]:
+        """(every bot id in list order, the pinned ones). Bots not placed yet join at the end, oldest first."""
+        order, pinned = self._read_order()
+        known = [i for i in order if i in self.controllers]
+        new = sorted((i for i in self.controllers if i not in known),
+                     key=lambda i: ((self.controllers[i].folder / "config.json").stat().st_ctime
+                                    if (self.controllers[i].folder / "config.json").exists() else 0, i))
+        pins = [i for i in pinned if i in self.controllers]
+        if new or known != order or pins != pinned:
+            self._write_order(known + new, pins)
+        return known + new, pins
+
+    def set_order(self, body: dict) -> dict:
+        """{"order": [ids], "pinned": [ids]} from a drag and drop; unknown ids are dropped, missing ones kept."""
+        with self._order_lock:
+            old, old_pins = self.order()
+            order = [i for i in dict.fromkeys(body.get("order") or []) if i in self.controllers]
+            order += [i for i in old if i not in order]
+            pins = body.get("pinned", old_pins)
+            pins = [i for i in dict.fromkeys(pins or []) if i in self.controllers]
+            self._write_order(order, pins)
+        return self.list()
+
+    def pin(self, bot_id: str, body: dict) -> dict:
+        self.get(bot_id)
+        with self._order_lock:
+            order, pins = self.order()
+            pins = [i for i in pins if i != bot_id] + ([bot_id] if body.get("pinned", True) else [])
+            self._write_order(order, pins)
+        return self.list()
 
     def animal_name(self) -> str:
         """A random animal no other bot of this user is called (a blank Bot name gets one)."""
@@ -438,10 +529,29 @@ def schema() -> dict:
             "coins": COINS, "timeframes": TIMEFRAMES, "version": __version__, "started": STARTED}
 
 
+def bet_pace(rows: list[dict]) -> Optional[float]:
+    """Bets per day in this bot's history (None with fewer than 10 bets), to turn simulated bets into days."""
+    from datetime import datetime
+    times = []
+    for r in rows:
+        try:
+            times.append(datetime.fromisoformat(r["time"]).timestamp())
+        except (KeyError, TypeError, ValueError):
+            pass
+    times.sort()
+    if len(times) < 10 or times[-1] - times[0] < 3600:
+        return None
+    return (len(times) - 1) / ((times[-1] - times[0]) / 86400)
+
+
+ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and pins
+
 BOT_PATH = re.compile(r"^/api/bots/([A-Za-z0-9_-]{1,30})/([a-z_]+)$")
 BOT_POST = {"start": Controller.start, "stop": Controller.stop, "reset": Controller.reset,
-            "paper_reset": Controller.paper_reset, "check": Controller.check}
-BOT_POST_BODY = {"settings": Controller.put_settings, "plan": Controller.plan, "keys": Controller.put_keys}
+            "paper_reset": Controller.paper_reset, "check": Controller.check,
+            "stop_after_win": Controller.stop_after_win, "cancel_after_win": Controller.cancel_after_win}
+BOT_POST_BODY = {"settings": Controller.put_settings, "plan": Controller.plan, "keys": Controller.put_keys,
+                 "simulate": Controller.simulate}
 
 
 def make_handler(app: Optional[App], public_hosts: tuple = ()):
@@ -504,12 +614,16 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
                 return self._json(401, {"error": "Sign in first."})
             if self.path == "/api/bots":
                 return self._call(app.create, body)
+            if self.path == "/api/order":
+                return self._call(app.set_order, body)
             m = BOT_PATH.match(self.path)
             if not m:
                 return self._json(404, {"error": "not found"})
             bot_id, action = m.groups()
             if action == "delete":
                 return self._call(app.delete, bot_id)
+            if action == "pin":
+                return self._call(app.pin, bot_id, body)
             if action in ("start", "check"):
                 refusal = self._live_refusal(app, bot_id)
                 if refusal:

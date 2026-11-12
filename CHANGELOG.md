@@ -4,6 +4,136 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-13
+
+### Bot list: drag to reorder, pin to the top
+- **What:** like the hyperliquid bot: drag a bot card to reorder the list (a line shows where it lands), or select
+  one and press Alt+↑/↓. 📌 on a card (shown on hover, always when on) pins it to the top; dropping a bot onto a
+  pinned one pins it, onto an unpinned one unpins it. The order is saved by the app, so every browser sees it.
+- **Why:** the owner: "bot list should be dragable and pinned as like hyperliquid".
+- **How:** `App.order` / `set_order` / `pin` and a sorted `App.list` (pinned first, then the saved order; new bots
+  at the end, oldest first), stored in `profiles/.order.json` (per user on the hosted site); POST `/api/order` and
+  `/api/bots/<id>/pin`. `index.html`: `wireBotOrder` (drag, drop, Alt+arrows), `.bi-pin`; the 10 s list refresh
+  doesn't redraw mid-drag.
+- **Tests:** `test_web.test_order_and_pins`.
+
+### Stop right away / Stop after a win
+- **What:** Stop (on the bot's page and in the bot list) opens a menu like bcauto's: **Stop right away** (as
+  before), **Stop after a win** (keep betting and stop at the next winning bet, back at step 1), and while waiting
+  **Don't wait for a win**. The button then says "Stop after win…" and the status line "🏁 stops after the next win".
+  The bot then shows as Stopped (not halted); Start runs it again without a Reset.
+- **Why:** the owner: "stop button has option "stop right away" and "stop after a win" as like bcauto stop."
+- **How:** `Bot.stop_after_win` (saved in the state; cleared by Start/Reset), checked in `Bot._settle` after a win
+  -> halt "after_win"; `Controller.stop_after_win` / `cancel_after_win` (POST `/api/bots/<id>/stop_after_win`,
+  `/cancel_after_win`); the bot summary reports `stop_after_win` and doesn't count "after_win" as halted;
+  `index.html` `stopMenu`.
+- **Tests:** `test_engine.test_stop_after_win`, `test_web.test_stop_after_win_endpoints`.
+
+### Simulation: history table
+- **What:** the simulation's run 1 is listed as a **History (run 1)** table, open by default, with the same
+  columns as the bot's History: #, Step, Price, Shares, Cost, Fee, Result, Payout, Net, Total, Budget left, plus a
+  row at each ladder end or when the budget runs out.
+- **Why:** the owner: "simulation part should have history table for that."
+- **How:** `simulate.py` log rows carry price, shares, fee and payout; `index.html` `simLogHtml`.
+- **Tests:** existing simulation tests.
+
+### Bet mode tile replaces Budget left
+- **What:** the tiles at the top of a bot's page show its **Bet mode** ("Hit 0.75 · first side to reach it",
+  "Time · 2 min left, the leader", "Side · random · 0.45–0.55") instead of Budget left.
+- **Why:** the owner: "show mode type on header part. remove budget left card instead".
+- **How:** `index.html` `modeTile(settings)`.
+- **Tests:** none (display only).
+
+### Simulation panel
+- **What:** a **🎲 Simulation** panel on each bot's page (after History), like the hyperliquid bot's: Bets per run, Runs, Budget
+  (empty = budget left) and Win chance (empty = the price, a fair market) -> average / median / worst 5% / best 5%,
+  runs in profit / with a ladder end / out of budget, longest losing streak, biggest drop, days at the bot's pace,
+  a histogram, 5 sample runs and run 1 bet by bet. It shows the win chance needed to break even after fees.
+- **Why:** the owner: "add simulate mode as like hyperliquid simulation."
+- **How:** `poly_bot/simulate.py` (pure; the bot's own `shares_for`/`cost_of`/`streak_sizing`, cached per step);
+  `Controller.simulate` (POST `/api/bots/<id>/simulate`, form settings unsaved, price = `plan_price`, pace from the
+  trade log); `index.html` panel kept across the page's 2 s redraws.
+- **Tests:** `test_strategy.SimulateTest` (fair market loses the fee, max steps cap, sure win/loss, limits),
+  `test_web.test_simulate_uses_form_settings_and_budget`.
+
+### Current bet: real-time round volume and a highlighted win chance
+- **What:** the Current bet panel shows the round's traded **volume** in real time ($, number of trades, shares),
+  and, while the bet runs, a big **Win chance now** for the bet's side: green when ahead (over 50%), red when
+  behind, with both sides' percentages and the bar below. A round first seen mid-way (e.g. after an app restart)
+  says "since <time>".
+- **Why:** the owner: "show volume of current bet. and plz highlight percentage while bet is running." / "round
+  volume is incorrect. it should update in real-time." Gamma's `volume` lags by minutes ($2-$4 shown for rounds
+  that had traded over $1,000) and the data API's `/v2/live-volume` differs from server to server.
+- **How:** `poly_bot/volume.py` `VolumeFeed`: one WebSocket to Polymarket's CLOB market channel for the whole app
+  (`Polymarket.volumes`), adding up every `last_trade_price` (size x price) per round; bots subscribe the current
+  and the next round from `Bot._enter`, so counting starts before a round does (new rounds are added to the open
+  socket with `operation: subscribe`; a reconnect marks running rounds partial). `Bot._hold` reads it each tick;
+  without the `websockets` package it falls back to Gamma's number, labelled delayed. `index.html` `winNow`.
+- **Tests:** `test_markets.VolumeFeedTest` (trades counted per round, other events and tokens ignored); checked
+  live against a raw socket: both counted $123 over the same 20 s.
+
+### Time mode: bet on the leader with N seconds left
+- **What:** Bet mode gets a third option, **time**: when **Time left** is reached (default 120 s = 2 minutes before
+  the end), the bot buys the side that is leading (the dearer one). **Leader at least** (empty = any lead, e.g.
+  0.60) and **Pay at most** (shared with hit mode; empty = no limit) bound the price; outside them the bot keeps
+  checking until 5 s before the end. Side mode, Min/Max price and Entry window are hidden in time mode.
+- **Why:** the owner: "add another mode plz. so side mode, hit mode, time mode" / "if set 2min, then bet when 2mins
+  left." (after the comeback stats: a leader at 0.60-0.70 with ~2 min left won ~74% vs ~67% needed.)
+- **How:** `config.FIELDS` `entry_mode` += "time", `time_left_sec`, `time_min_price`; `strategy.entry_span`,
+  `leader_side`, `buy_cap`/`plan_price` (time with no limit: Leader at least, else 0.75); `Bot._enter` time branch;
+  `index.html` shows each mode's fields and chips.
+- **Tests:** `test_engine` time mode waits until 2 min left then buys the leader, and respects Leader at least / Pay
+  at most / the 5 s cut-off; `test_strategy.TimeModeTest`.
+
+### Ladder table priced by the bot's settings, no "At price" box
+- **What:** the Martingale ladder's "At price" box is gone. The table prices every bet at the most the settings let
+  the bot pay (side mode: Max price; hit mode: Pay at most, or the Hit price when it's empty) and says so above the
+  table. The Step tile and the bot list use the same price, so they always agree with the table.
+- **Why:** the owner: "why need input on ladder table?" The box only changed the table, which confused it with the
+  tile (e.g. "Step 1 of 4" at 0.75 next to a table showing 2 steps at a typed 0.90).
+- **How:** `strategy.plan_price` (used by `web.py` for the status ladder and the bot cards); `index.html` drops the
+  input, previews only unsaved settings.
+- **Tests:** `test_strategy.HitModeTest` checks plan_price for side, hit and hit-without-limit.
+
+### Hit mode: buy the first side that reaches a price
+- **What:** new setting **Bet mode** (Mode & side card): `side` (as before) or `hit`. In hit mode the bot watches
+  both sides through the whole round and buys whichever first reaches the **Hit price** (default 0.75), paying at
+  most **Pay at most** (empty by default = no limit, up to 0.99). Side mode, First side and Min/Max price are hidden and unused; Entry window
+  0 = the whole round (minus 5 s). Sizing, ladder, budget, Until earn work as before.
+- **Why:** the owner: "when it hits over 75 cents, it rarely goes back against". A 7-day backtest (2,016 BTC 5m
+  rounds, 1-minute prices) found the side first at 0.70-0.80 won 76.9% vs ~76% needed after fees: about break-even,
+  so start on paper.
+- **How:** `config.FIELDS` `entry_mode`, `hit_price`, `hit_max_price` (validated: hit <= max <= 0.99, or 0 = no limit);
+  `strategy.hit_side` / `buy_cap` / `plan_price`, `entry_window(..., hit)`; `Bot._enter` hit branch, the buying
+  half split into `Bot._buy(cap)`; `web.py` ladder at `plan_price`; `index.html` shows/hides fields and chips.
+- **Tests:** `test_engine` hit mode buys the first side to hit (side mode ignored, after the normal window) and
+  waits when the price jumped past Pay at most; `test_strategy.HitModeTest`.
+
+### Live profit is after fees
+- **What:** a live bot's "Profit since Reset" ran ahead of the real pUSD balance: after a Reset at $153.36 it showed
+  +$19.31 with $165.51 in the wallet (really +$12.15). The $7.16 gap was exactly the 29 bets' fees. Every live
+  profit (tile, history Net/Total, Until earn, the streak to win back) is now after fees.
+- **Why:** the owner: "this round start from 150 but why profit 19.31 even only 165? what's wrong?" / "show after
+  fee plz. only real profit plz."
+- **How:** `LiveClient.buy` took the all-in cost from the pUSD balance before/after the order, but the read right
+  after the order still showed the old balance, so the cost fell back to the order amount *without* the fee, which
+  Polymarket takes in pUSD on top. The fee was also guessed from "shares asked minus shares got", which is just
+  rounding. Now the fee is Polymarket's documented taker fee (or the balance's, when the balance shows it), and
+  when the balance hasn't caught up the cost is the order amount plus that fee. Checked against the wallet: the
+  documented fee matched the balance change on all 236 live bets that had no deposit/withdrawal in between.
+  The owner's live bot's history (`trades-live.csv`: cost, fee, pnl, total_pnl) and state (profit, streak lost)
+  were corrected the same way once; backups saved next to them as `*.bak-<time>`.
+- **Tests:** `test_live.test_fee_counted_when_balance_lags` (fake SDK whose balance read lags the order).
+
+### Step bar shows only the steps the budget reaches
+- **What:** when the ladder ends because the next step costs more than the budget left (e.g. 8 lost, step 9 costs
+  $945 with $218 left), the Step tile said "Step 9 of 9" with a 9th red pip. It now says "Step 8 of 8 · step 9
+  doesn't fit" with 8 lost pips; the bot list shows "step 8/8" and an 8-pip bar.
+- **Why:** the owner: "this took only step 8 but show to step 9. show bar about available steps."
+- **How:** `web.py` bot card `fits` = steps the budget reaches (lost + still affordable), no longer clamped up to the
+  current step; `index.html` `stepPips` draws one pip per reachable step and the Step tile reuses it.
+- **Tests:** existing suite passes.
+
 ## [0.1.6] - 2026-11-12
 
 ### Step tile counts the whole ladder

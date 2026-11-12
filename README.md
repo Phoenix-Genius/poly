@@ -119,6 +119,24 @@ $10.51, $27.43, $71.58, $186.79: step 5 costs almost 4× as much as at 0.50. **M
 one by **Multiplier**. Because a win returns only ~1.93× at 0.50, a multiplier of 2 does *not* recover a streak;
 use 2.1 or more. recover sizing works it out for you.
 
+### Simulation: what your settings do in the long run
+
+A few days of betting can't show what a martingale does over months: the rare long losing streaks decide it. The
+**🎲 Simulation** panel on a bot's page plays the settings in the form (saved or not) through many runs at once:
+**Bets per run** and **Runs** (up to 1 million bets in total, about a second), **Budget** (empty = the bot's budget
+left) and **Win chance** (empty = the price: a fair market, where 0.75 wins 75% of the time).
+
+Every bet is bought at the ladder table's price (Max price, or Pay at most / the Hit price) and wins with that
+chance. Sizing, Polymarket's fee, the 5-share minimum, Recover over N wins, Steps to survive, Max losses in a row and
+the budget are the bot's own. A ladder end starts again at step 1 with the money left; a run stops when even step 1
+no longer fits. **Not included:** slippage, prices changing from bet to bet, Until earn.
+
+It shows the average, typical (median), worst-5% and best-5% result, how many runs ended in profit / had a ladder
+end / used up the budget, the longest losing streak and biggest drop, how many days the bets take at the bot's own
+pace (from its history), a histogram of how the runs ended, 5 sample runs, and run 1 bet by bet. With the default
+win chance, the fee makes every setting lose a little on average: a Win chance above the "needs X% to break even"
+figure is what any edge has to beat.
+
 ## 4. Settings reference
 
 | Setting | Default | What it does |
@@ -138,6 +156,11 @@ use 2.1 or more. recover sizing works it out for you.
 | `target_steps` | 0 (= off) | Steps to survive: works out the first bet (Profit per win, or Starting bet with multiply) so the budget pays for this many losses in a row even at the Max price. Recalculated at each new streak from the budget left. |
 | `max_steps` | 0 (= budget decides) | End the ladder after this many losses in a row. |
 | `on_ladder_end` | stop | `stop` = halt (press Reset). `reset` = accept the loss and start again at step 1. |
+| `entry_mode` | side | `side` = pick a side by `side_mode` and buy it within Min/Max price in the entry window. `hit` = watch both sides and buy whichever first reaches `hit_price`, any time in the round. `time` = when `time_left_sec` are left, buy the leading (dearer) side. In hit and time mode side mode and Min/Max price are unused. |
+| `time_left_sec` | 120 | time mode: bet when this many seconds are left; if the leader's price isn't within the limits then, keep checking until 5 s before the end. |
+| `time_min_price` | 0 (any) | time mode: bet only if the leader costs at least this, e.g. 0.60. |
+| `hit_price` | 0.75 | hit mode: buy the first side whose best ask reaches this. |
+| `hit_max_price` | 0 (no limit) | hit and time mode: never pay more per share, e.g. 0.80; if a side jumped past it, wait for a price back in between. Empty/0 = no limit (up to 0.99). |
 | `side_mode` | alternate | `alternate` Up/Down/Up…, `follow_last` = what the last finished round was, `opposite_last` = against it, `cheaper` = the lower-priced side, `up_only`, `down_only`, `flip_on_loss`, `flip_on_win`, `random`. |
 | `first_side` | up | The first side for alternate/flip modes, and the fallback when the last result isn't known. |
 | `min_price` | 0.45 | Never bet on a side cheaper than this (stops long shots). If it is cheaper, the bot waits; after the entry window it skips the round. 0 = no minimum. |
