@@ -173,7 +173,11 @@ The legacy `py-clob-client` is superseded: don't use it.
   Simulation panel after History, with a run-1 history table; Bet mode tile instead of Budget left; Stop menu
   "right away / after a win" like bcauto; bot list drag + pin like hyperliquid; round volume must be real time
   (Gamma's lags: use the CLOB WebSocket, `volume.py`).
-- **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13).
+- **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13) and 1.1.0 ("c and p minor
+  update", same day).
+- **Simulation must be real (2026-11-13):** "plz simulate as real for all modes." Default = replay past rounds
+  (`history.py`, `simulate.entry_for`); keep its entry rules in step with the engine's when a mode changes. Hit
+  fills are calibrated (`HIT_FILL`) on the paper bots' real fills: re-check against more fills later.
 - **Open questions:** Telegram/Google Sheet notifications like hyperliquid;
   translations; a backtest over past rounds; whether to settle early from the closing price instead of waiting
   1-5 min for the official result (would let 5m bots bet every round).

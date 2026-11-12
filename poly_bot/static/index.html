@@ -237,6 +237,8 @@
   tr.cur td { background: var(--active-bg); font-weight: 700; }
   tr.over td { color: var(--muted); text-decoration: line-through; }
   tr.played td { color: var(--muted); }
+  tr.ev td { background: var(--amber-bg); color: var(--amber); font-weight: 600; white-space: normal; }
+  tr.ev-settings td { background: var(--active-bg); color: var(--accent); }
   .scroll { overflow-x: auto; }
   .ladder-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 13px; }
   #ladderPanel.preview { --sec: var(--accent); }
@@ -700,6 +702,9 @@ function render() {
   const stepBar = stepPips(s.step, maxSteps);
   const stepLabel = over ? `Step ${maxSteps} of ${maxSteps} · step ${s.step} doesn't fit` : `Step ${s.step} of ${maxSteps}`;
   const keepScroll = $("#log")?.scrollTop, logAtEnd = !$("#log") || $("#log").scrollHeight - $("#log").scrollTop - $("#log").clientHeight < 30;
+  // the page is redrawn every 2 s: keep where each scrolling box (history, simulation table, ladder) was scrolled to
+  const boxes = {};
+  page.querySelectorAll(".panel .scroll").forEach((el, i) => { boxes[(el.closest(".panel")?.id || "") + i] = [el.scrollTop, el.scrollLeft]; });
   page.innerHTML = `
     <div class="head">
       <h1 data-no-i18n>${esc(s.name)}</h1>
@@ -726,7 +731,7 @@ function render() {
     ${betPanel(s)}
     <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Martingale ladder <span class="sum" id="ladderSum"></span></h2>
       <div class="body"><div class="ladder-tools muted" id="ladderNote"></div><div class="scroll" id="ladderTable"></div></div></section>
-    ${panel("historyPanel", "History", `${s.trade_count} bets`, historyTable(s.trades))}
+    ${panel("historyPanel", "History", `${s.trade_count} bets`, historyTable(s.trades, s.events || []))}
     ${panel("simPanel", "🎲 Simulation", "what these settings do over many bets", simPanelBody())}
     ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
   `;
@@ -740,7 +745,8 @@ function render() {
   $("#saveKeys")?.addEventListener("click", saveKeys);
   $("#checkKeys")?.addEventListener("click", () => doAct("check"));
   const log = $("#log"); if (log) log.scrollTop = logAtEnd ? log.scrollHeight : keepScroll;
-  renderLadder();
+  renderLadder();                     // fills the ladder table, so its scroll is restored after this
+  page.querySelectorAll(".panel .scroll").forEach((el, i) => { const p = boxes[(el.closest(".panel")?.id || "") + i]; if (p) [el.scrollTop, el.scrollLeft] = p; });
 }
 function keysPanel(s) {
   const k = s.keys, c = s.live_check || {};
@@ -804,45 +810,65 @@ function betPanel(s) {
 }
 // --- simulation (like the hyperliquid bot's): these settings over many bets in a fair market ---
 // The page is re-rendered every few seconds, so the inputs and the last result live here, not in the DOM.
-const simIn = {bets: "1000", runs: "1000", bankroll: "", win: ""};
+const simIn = {bets: "1000", runs: "1000", bankroll: "", win: "", market: "real"};
+let simLoading = null;          // {done, total} while past rounds download
 let simResult = null, simFor = "", simBusy = false, simLogOpen = true;
 const sgnMoney = v => money(v, true);
 const pctTxt = x => (x * 100 < 1 && x > 0 ? "<1" : x * 100 > 99 && x < 1 ? ">99" : Math.round(x * 100)) + "%";
 function simPanelBody() {
   if (simFor !== current) { simResult = null; simFor = current; }
   const inp = (k, label, ph) => `<div><label>${label}</label><input data-sim="${k}" value="${esc(simIn[k])}" placeholder="${ph}" inputmode="decimal"></div>`;
-  return `<div class="simhelp">Plays the ladder bet after bet, many times over. Every bet is bought at the ladder's price and, unless you set a
-      Win chance, wins as often as that price says (a fair market: 0.75 wins 75%). Fees, the 5-share minimum and the budget are included;
-      slippage is not, so real results are usually a little worse. A ladder end starts again at step 1 with the money left. Uses the
-      settings in the form, saved or not.</div>
-    <form class="simform" id="simForm">${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
-      ${inp("win", "Win chance (%)", "= price")}
-      <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? "Simulating…" : "Run simulation"}</button></form>
+  const real = simIn.market === "real";
+  return `<div class="simhelp">Plays the ladder bet after bet, many times over, with the settings in the form (saved or not).
+      <b>Past rounds</b> replays Polymarket's real rounds of this coin and timeframe (the last ~7 days, price minute by minute) through
+      this Bet mode's own entry rule: every bet at the price the bot would really have paid then, winning only if that round really went
+      that way, and the next bet only after the previous one is paid out. <b>Fair coin</b> prices every bet at the ladder's price and lets it
+      win as often as that price says (or your Win chance). Fees, the 5-share minimum and the budget are included. A ladder end starts
+      again at step 1 with the money left.</div>
+    <form class="simform" id="simForm">
+      <div><label>Market</label><select data-sim="market"><option value="real" ${real ? "selected" : ""}>Past rounds (real)</option><option value="fair" ${real ? "" : "selected"}>Fair coin</option></select></div>
+      ${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
+      ${real ? "" : inp("win", "Win chance (%)", "= price")}
+      <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? (simLoading ? "Loading past rounds…" : "Simulating…") : "Run simulation"}</button>
+      ${simLoading ? `<span class="simhelp">${simLoading.total ? `Downloading past rounds from Polymarket: ${simLoading.done.toLocaleString()} of ${simLoading.total.toLocaleString()}` : "Listing past rounds…"} (once; later only new rounds)</span>` : ""}</form>
     <div id="simOut" style="opacity:${simBusy && simResult ? .45 : 1}">${simResult ? simHtml(simResult) : ""}</div>`;
 }
 function wireSim() {
   $(".simlog")?.addEventListener("toggle", e => { simLogOpen = e.target.open; });
   const f = $("#simForm"); if (!f) return;
-  for (const el of f.querySelectorAll("[data-sim]")) el.addEventListener("input", () => { simIn[el.dataset.sim] = el.value; });
-  f.addEventListener("submit", async e => {
-    e.preventDefault();
-    simBusy = true; render();
-    try {
-      simResult = await api(`/api/bots/${current}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll,
-        win_chance: simIn.win, settings: formValues()});
-    } catch (err) { toast(err.message); }
-    simBusy = false; render();
+  for (const el of f.querySelectorAll("[data-sim]")) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+    simIn[el.dataset.sim] = el.value;
+    if (el.tagName === "SELECT") render();               // Win chance is only for the fair coin
   });
+  f.addEventListener("submit", async e => { e.preventDefault(); runSim(); });
+}
+// Past rounds download the first time (about a minute): ask again every 3 s until they're there
+async function runSim() {
+  simBusy = true; render();
+  const id = current;
+  try {
+    const r = await api(`/api/bots/${id}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll,
+      win_chance: simIn.win, market: simIn.market, settings: formValues()});
+    if (r.loading && id === current) { simLoading = r.loading; render(); setTimeout(() => id === current ? runSim() : (simBusy = false, simLoading = null), 3000); return; }
+    simResult = r;
+  } catch (err) { toast(err.message); }
+  simBusy = false; simLoading = null; render();
 }
 function simHtml(r) {
   const f = r.first_bet, pace = r.pace_per_day;
   const days = pace ? ` · about ${Math.max(1, Math.round(r.bets / pace))} days at this bot's pace (${pace.toFixed(0)} bets/day)` : "";
   const tile = (label, value, sub, c = "") => `<div><div class="label">${label}</div><div class="value num ${c}">${value}</div><div class="sub">${sub}</div></div>`;
-  const edge = r.p_win - r.break_even;
+  const edge = r.p_win - r.break_even, h = r.history;
+  const day = ts => new Date(ts * 1000).toLocaleDateString([], {month: "short", day: "numeric"});
+  const basis = r.mode === "real" && h
+    ? `Replayed ${h.rounds.toLocaleString()} past rounds (${day(h.from)} – ${day(h.to)}); the bot would have bought in ${h.with_entry.toLocaleString()} of them,
+       at ${h.price_low?.toFixed(2)}–${h.price_high?.toFixed(2)} (median ${h.price_median?.toFixed(2)}). The bets averaged ${r.price.toFixed(3)} and won
+       ${(r.p_win * 100).toFixed(1)}%; at those prices ${(r.break_even * 100).toFixed(1)}% is needed to break even after fees`
+    : `Every bet at ${r.price.toFixed(2)}: wins ${(r.p_win * 100).toFixed(1)}% of the time, needs ${(r.break_even * 100).toFixed(1)}% to break even after fees`;
   return `<div class="simhelp">${r.runs.toLocaleString()} runs of ${r.bets.toLocaleString()} bets from ${money(r.bankroll)}${days}.
-      Every bet at ${r.price.toFixed(2)}: wins ${(r.p_win * 100).toFixed(1)}% of the time, needs ${(r.break_even * 100).toFixed(1)}% to break even after fees
-      (<b class="${tone(edge)}">${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)} points</b>).
-      ${f ? `First bet: ${money(f.cost)}, a win ${sgnMoney(f.win)}, a loss ${sgnMoney(f.loss)}.` : "The budget can't pay for Steps to survive."}</div>
+      ${basis} (<b class="${tone(edge)}">${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)} points</b>).
+      ${r.mode === "real" ? "Past results don't promise future ones: a week is a small sample." : ""}
+      ${f && r.mode !== "real" ? `First bet: ${money(f.cost)}, a win ${sgnMoney(f.win)}, a loss ${sgnMoney(f.loss)}.` : f ? "" : "The budget can't pay for Steps to survive."}</div>
     <div class="simstats">
       ${tile("Average result", sgnMoney(r.average), `${sgnMoney(r.average / Math.max(1, r.bets_avg))} per bet`, tone(r.average))}
       ${tile("Typical run (median)", sgnMoney(r.median), "half the runs did better, half worse", tone(r.median))}
@@ -851,7 +877,7 @@ function simHtml(r) {
       ${tile("Runs ending in profit", pctTxt(r.profit_chance), "the rest ended at a loss")}
       ${tile("Runs with a ladder end", pctTxt(r.ladder_end_chance), `${r.ladder_ends_avg.toFixed(1)} ladder ends per run on average`)}
       ${tile("Runs that used up the budget", pctTxt(r.broke_chance), "step 1 no longer fit, the run stopped")}
-      ${tile("Longest losing streak", `${r.longest_streak_median} in a row`, `typical run (up to ${r.longest_streak_max}) · biggest drop ${money(-r.drawdown_median)}`)}
+      ${tile("Longest losing streak (typical run)", `${r.longest_streak_median} in a row`, `half the runs had a longer one · run 1 (the table below): ${r.longest_streak_run1 ?? "–"} · worst run: ${r.longest_streak_max} · biggest drop ${money(-r.drawdown_median)}`)}
     </div>
     <div class="simcharts">
       <div class="simchart"><h3>How the runs ended</h3><div class="simhelp">Runs by final P&amp;L after ${r.bets.toLocaleString()} bets: losses red, profits blue.</div>${histSVG(r)}</div>
@@ -860,18 +886,19 @@ function simHtml(r) {
     ${simLogHtml(r)}`;
 }
 function simLogHtml(r) {
-  const L = r.log || [], shown = L.filter(t => !t.event).length;
+  const L = r.log || [], shown = L.filter(t => !t.event).length, real = r.mode === "real";
+  const roundTxt = ts => ts ? new Date((ts + 9 * 3600) * 1000).toISOString().slice(5, 16).replace("T", " ") : "";   // JST, like History
   if (!L.length) return "";
   // the same columns as the bot's own History (no round, side or slippage: the simulation has none)
   const rows = L.map(t => t.event
-    ? `<tr class="ev"><td colspan="11">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🛑 Ladder end: back to step 1"}</td></tr>`
-    : `<tr><td class="l num">${t.n}</td><td class="num">${t.step}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
+    ? `<tr class="ev"><td colspan="${real ? 13 : 11}">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🛑 Ladder end: back to step 1"}</td></tr>`
+    : `<tr><td class="l num">${t.n}</td>${real ? `<td class="l num">${roundTxt(t.round)}${t.at != null ? ` <small class="muted">+${t.at}s</small>` : ""}</td><td class="l">${sideHtml(t.side)}</td>` : ""}<td class="num">${t.step}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
       <td class="num">${money(t.cost)}</td><td class="num neg">${money(-t.fee)}</td>
       <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td><td class="num">${money(t.payout)}</td>
       <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`).join("");
   return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b></summary>
     <div class="simhelp">The first ${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets of run 1, oldest first, as the simulation played them, with the ladder ends and the budget running out in between.</div>
-    <div class="scroll"><table><tr><th class="l">#</th><th>Step</th><th>Price</th><th>Shares</th><th>Cost</th><th>Fee</th><th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Budget left</th></tr>${rows}</table></div></details>`;
+    <div class="scroll"><table><tr><th class="l">#</th>${real ? '<th class="l" title="The past round (JST) and how far into it the bot bought">Round (JST)</th><th class="l">Bet</th>' : ""}<th>Step</th><th>Price</th><th>Shares</th><th>Cost</th><th>Fee</th><th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Budget left</th></tr>${rows}</table></div></details>`;
 }
 const SW = 560, SH = 220, SPL = 52, SPR = 8, SPT = 8, SPB = 26;   // chart box (SVG units)
 function niceTicks(lo, hi, n = 4) {
@@ -926,8 +953,10 @@ function renderLadder() {
     ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}${r.left_after_win > 0.005 ? ` <small class="muted">· ${money(r.left_after_win)} left</small>` : ""}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
   </table>`;
 }
-function historyTable(rows) {
-  if (!rows.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
+// the bets, newest first, with Resets and settings changes in between (by time)
+function historyTable(trades, events = []) {
+  if (!trades.length && !events.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
+  const rows = [...trades, ...events.map(e => ({...e, event: true}))].sort((a, b) => (b.time > a.time) - (b.time < a.time));
   const dash = '<span class="muted">–</span>';
   const slip = t => t.slippage === "" || t.slippage == null ? dash : (+t.slippage ? money(-t.slippage) : "$0.00");
   const costs = t => {                     // fee + slippage as a share of the bet
@@ -939,7 +968,7 @@ function historyTable(rows) {
       <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
       <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
-    ${rows.map(t => `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
+    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
       <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>

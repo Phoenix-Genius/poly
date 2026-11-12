@@ -28,14 +28,16 @@ from .instance import PROFILES_DIR, ROOT, AlreadyRunning, acquire_lock, bot_ids,
 from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
+from .history import MIN_ROUNDS, History
 from .simulate import simulate
 from .strategy import build_ladder, buy_cap, plan_price, steps_that_fit, streak_sizing
-from .trades import read_trades
+from .trades import append_event, read_events, read_trades
 
 log = logging.getLogger("poly")
 STATIC = Path(__file__).parent / "static"
 FORMAT = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S")
 PM = Polymarket()                     # shared by all bots: one cache of series ids
+HISTORY = History(PM)                 # past rounds for the real simulation, shared too
 RUNNING_MARK = ".running"             # in a bot's folder while it should be running
 STARTED = str(time.time())            # changes on every app start; an open page reloads its settings form then
 
@@ -187,7 +189,10 @@ class Controller:
         self._check_owned()
         if self.running:
             raise ValueError("Stop the bot first, then Reset.")
+        lad = self.bot.ladder
+        before = f"was step {lad.step}, profit since Reset {'+' if lad.pnl >= 0 else '-'}${abs(lad.pnl):,.2f}"
         self.bot.reset()
+        append_event(self.folder, "reset", f"Reset: fresh ladder at step 1, profit counted from 0 ({before})")
         return self.status()
 
     def paper_reset(self) -> dict:
@@ -199,6 +204,8 @@ class Controller:
         self.bot.bet = None
         self.bot.reset()
         self.log.info("Paper account reset to $%.2f", self.cfg.paper_balance_usd)
+        append_event(self.folder, "paper_reset", f"Reset paper: balance ${self.cfg.paper_balance_usd:,.2f}, "
+                                                 f"fresh ladder at step 1")
         return self.status()
 
     def put_settings(self, body: dict) -> dict:
@@ -208,7 +215,11 @@ class Controller:
             raise ValueError("Stop the bot and let its open bet pay out before switching between paper and live.")
         if "bot_name" in body and not str(body["bot_name"] or "").strip():
             body = {**body, "bot_name": self.name_for_blank()}
+        old = self.cfg.settings()
         cfg = save_settings(self.config_path, body)
+        changed = settings_diff(old, cfg.settings())
+        if changed:
+            append_event(self.folder, "settings", "Settings: " + " · ".join(changed))
         if (cfg.coin, cfg.timeframe) != (self.cfg.coin, self.cfg.timeframe):
             self.pm.series_id(cfg.coin, cfg.timeframe)            # tell now, not at Start
         if cfg.network != self.cfg.network:
@@ -270,7 +281,16 @@ class Controller:
             raise ValueError("Bets, runs, budget and win chance must be numbers")
         if bankroll <= 0:
             bankroll = self._budget(cfg)
-        out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, chance)
+        rounds = None
+        if body.get("market", "real") == "real":           # replay past rounds (history.py)
+            history = HISTORY if self.pm is PM else History(self.pm)
+            rounds, progress = history.rounds(cfg.coin, cfg.timeframe)
+            if len(rounds) < MIN_ROUNDS:
+                if progress and progress.get("error") and not (progress["total"] or progress["done"]):
+                    raise ValueError(f"Couldn't load past rounds from Polymarket: {progress['error']}")
+                return {"loading": progress or {"done": 0, "total": 0}, "have": len(rounds)}
+            chance = None
+        out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, chance, rounds=rounds)
         out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
         self.log.info("Simulated %d runs x %d bets from $%.2f at %.2f: average %+.2f, %.0f%% end in profit", runs,
                       bets, bankroll, out["price"], out["average"], out["profit_chance"] * 100)
@@ -359,6 +379,9 @@ class Controller:
             "next_in": fmt_secs(next_start - now) if next_start else "",
             "ladder": self._ladder(self.cfg, plan_price(self.cfg), b.ladder.step, b.ladder.base),
             "trades": list(reversed(trades[-100:])),
+            # Resets and settings changes since the oldest bet shown (all of them while every bet is shown)
+            "events": [e for e in read_events(self.folder, 300)
+                       if len(trades) <= 100 or e.get("time", "") >= trades[-100]["time"]],
             "trade_count": len(trades),
             "log": list(self.lines.lines)[-150:],
         }
@@ -542,6 +565,18 @@ def bet_pace(rows: list[dict]) -> Optional[float]:
     if len(times) < 10 or times[-1] - times[0] < 3600:
         return None
     return (len(times) - 1) / ((times[-1] - times[0]) / 86400)
+
+
+def settings_diff(old: dict, new: dict) -> list[str]:
+    """["Hit price 0.75 → 0.7", ...] for every setting that changed (labels as on the form; 0 for "off" fields)."""
+    out = []
+    for k, (_, typ, _, label, _) in FIELDS.items():
+        a, b = old.get(k), new.get(k)
+        if a == b:
+            continue
+        show = lambda v: "empty" if v in ("", None) else (f"{v:g}" if isinstance(v, float) else str(v))  # noqa: E731
+        out.append(f"{label} {show(a)} → {show(b)}")
+    return out
 
 
 ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and pins

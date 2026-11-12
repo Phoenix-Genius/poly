@@ -24,6 +24,18 @@ class AppTest(unittest.TestCase):
                 c.lock.close()
         self.tmp.cleanup()
 
+    def test_reset_and_settings_logged_for_history(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        ctl.put_settings({"entry_mode": "hit", "hit_price": 0.7})
+        ctl.put_settings({"hit_price": 0.7})                      # nothing changed: nothing logged
+        ctl.reset()
+        ev = ctl.status()["events"]
+        self.assertEqual([e["kind"] for e in ev], ["settings", "reset"])
+        self.assertIn("Bet mode side → hit", ev[0]["text"])
+        self.assertIn("Hit price 0.75 → 0.7", ev[0]["text"])
+        self.assertIn("was step 1", ev[1]["text"])
+
     def test_order_and_pins(self):
         for coin in ("BTC", "ETH", "SOL"):
             self.app.create({"coin": coin, "timeframe": "5m"})
@@ -57,12 +69,46 @@ class AppTest(unittest.TestCase):
     def test_simulate_uses_form_settings_and_budget(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
-        r = ctl.simulate({"bets": 200, "runs": 50, "settings": {"entry_mode": "hit", "hit_price": 0.75}})
+        r = ctl.simulate({"bets": 200, "runs": 50, "market": "fair", "settings": {"entry_mode": "hit", "hit_price": 0.75}})
         self.assertEqual((r["bets"], r["runs"], r["price"], r["bankroll"]), (200, 50, 0.75, 1000))
         self.assertAlmostEqual(r["p_win"], 0.75)                 # fair market by default
-        r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "win_chance": "80"})
+        r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "win_chance": "80", "market": "fair"})
         self.assertEqual((r["bankroll"], r["p_win"], r["price"]), (300, 0.8, ctl.cfg.max_price))
         self.assertEqual(ctl.cfg.entry_mode, "side")             # simulate doesn't save
+
+    def test_simulate_real_replays_past_rounds(self):
+        import random
+        from unittest import mock
+        rng = random.Random(3)
+        rounds = []
+        for i in range(300):                                     # rounds whose Up price drifts to its result
+            res = rng.choice(["up", "down"])
+            end_p = 0.9 if res == "up" else 0.1
+            rounds.append({"slug": f"r{i}", "start": 1000.0 + 300 * i, "end": 1300.0 + 300 * i, "result": res,
+                           "h": [[t, round(0.5 + (end_p - 0.5) * t / 300, 3)] for t in range(-30, 301, 60)]})
+
+        class FakeHistory:
+            def __init__(self, pm):
+                pass
+
+            def rounds(self, coin, tf):
+                return rounds, None
+
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        with mock.patch("poly_bot.web.History", FakeHistory):
+            r = ctl.simulate({"bets": 50, "runs": 20, "settings": {"entry_mode": "time", "time_left_sec": 120}})
+        self.assertEqual(r["mode"], "real")
+        self.assertEqual(r["p_win"], 1.0)                        # the leader 2 min before the end always won here
+        self.assertGreater(r["price"], 0.7)                      # bought at the leader's real price, not 0.75 flat
+        self.assertEqual(r["history"]["rounds"], 300)
+        self.assertTrue(all("round" in t for t in r["log"] if not t.get("event")))
+
+        class Loading(FakeHistory):
+            def rounds(self, coin, tf):
+                return [], {"done": 10, "total": 2000, "error": ""}
+        with mock.patch("poly_bot.web.History", Loading):
+            self.assertEqual(ctl.simulate({})["loading"]["total"], 2000)
 
     def test_create_status_plan_delete(self):
         d = self.app.create({"coin": "ETH", "timeframe": "15m"})

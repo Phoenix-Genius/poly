@@ -47,3 +47,35 @@ def read_trades(path: Path, last: int = 0) -> list[dict]:
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     return rows[-last:] if last else rows
+
+
+# --- events: Resets and settings changes, shown between the bets in the History table ------------------------------
+# One JSON object per line in the bot's events.jsonl (for both networks, so a switch shows too):
+# {"time": "YYYY-MM-DD HH:MM:SS" (JST, like a bet's time), "kind": "reset" | "paper_reset" | "settings", "text": "..."}
+EVENTS_FILE = "events.jsonl"
+
+
+def jst_now() -> str:
+    import time
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() + 9 * 3600))
+
+
+def append_event(folder: Path, kind: str, text: str) -> None:
+    import json
+    with open(Path(folder) / EVENTS_FILE, "a") as f:
+        f.write(json.dumps({"time": jst_now(), "kind": kind, "text": text}) + "\n")
+
+
+def read_events(folder: Path, last: int = 0) -> list[dict]:
+    """The logged events, oldest first (only the newest `last` ones when last > 0)."""
+    import json
+    path = Path(folder) / EVENTS_FILE
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text().splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out[-last:] if last else out

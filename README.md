@@ -123,19 +123,32 @@ use 2.1 or more. recover sizing works it out for you.
 
 A few days of betting can't show what a martingale does over months: the rare long losing streaks decide it. The
 **🎲 Simulation** panel on a bot's page plays the settings in the form (saved or not) through many runs at once:
-**Bets per run** and **Runs** (up to 1 million bets in total, about a second), **Budget** (empty = the bot's budget
-left) and **Win chance** (empty = the price: a fair market, where 0.75 wins 75% of the time).
+**Bets per run** and **Runs** (up to 1 million bets in total) and **Budget** (empty = the bot's budget left).
 
-Every bet is bought at the ladder table's price (Max price, or Pay at most / the Hit price) and wins with that
-chance. Sizing, Polymarket's fee, the 5-share minimum, Recover over N wins, Steps to survive, Max losses in a row and
-the budget are the bot's own. A ladder end starts again at step 1 with the money left; a run stops when even step 1
-no longer fits. **Not included:** slippage, prices changing from bet to bet, Until earn.
+**Market: Past rounds (real)**, the default, replays Polymarket's real rounds of the bot's coin and timeframe (the
+last 2,016 rounds, about 7 days of 5m, with the Up price minute by minute; downloaded once in about a minute, kept in
+`data/history/`, then topped up) through the Bet mode's own entry rule:
 
-It shows the average, typical (median), worst-5% and best-5% result, how many runs ended in profit / had a ladder
-end / used up the budget, the longest losing streak and biggest drop, how many days the bets take at the bot's own
-pace (from its history), a histogram of how the runs ended, 5 sample runs, and run 1 bet by bet. With the default
-win chance, the fee makes every setting lose a little on average: a Win chance above the "needs X% to break even"
-figure is what any edge has to beat.
+- **side:** the side the Side mode picks, at the first moment in the Entry window its price is within Min/Max price;
+- **hit:** the first side to reach the Hit price. Prices jump between the bot's checks, so the fill is placed 60%
+  of the way from the Hit price to the next recorded price (the paper bots' real hit fills averaged 0.83 for 0.75;
+  the simulation gives 0.825); above Pay at most the bot waits;
+- **time:** the leader when Time left is reached, within Leader at least / Pay at most (else the first later
+  moment it is, until 5 s before the end).
+
+So every bet has the price the bot would really have paid (plus a 1-cent spread), wins only if that round really went
+that way, and the next bet waits until the previous one is paid out (about 3 minutes after its round). Runs stitch
+random half-day stretches of the history together, so each sees real streaks but runs differ. A week is a small
+sample: past results don't promise future ones.
+
+**Market: Fair coin** prices every bet at the ladder table's price and lets it win as often as that price says (or
+the **Win chance** you enter): a market the bot can't predict, where the fee makes every setting lose a little.
+
+Sizing, Polymarket's fee, the 5-share minimum, Recover over N wins, Steps to survive, Max losses in a row and the
+budget are the bot's own. A ladder end starts again at step 1 with the money left; a run stops when even step 1 no
+longer fits. It shows the average, typical, worst-5% and best-5% result, how many runs ended in profit / had a
+ladder end / used up the budget, the longest losing streak, the win rate against the break-even rate, a histogram,
+5 sample runs and run 1 bet by bet (with the past round and side of each bet).
 
 ## 4. Settings reference
 

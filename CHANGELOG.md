@@ -4,6 +4,58 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-13
+
+### Simulation replays real past rounds for every Bet mode
+- **What:** the simulation's default **Market** is now **Past rounds (real)**: it replays Polymarket's last 2,016
+  rounds of the bot's coin and timeframe through the Bet mode's own entry rule, so each bet has the price the bot
+  would really have paid (time mode: 0.56 to 0.99, not 0.75 flat) and wins only if that round really went that
+  way. The old model stays as **Fair coin**. The result says which rounds were replayed, the entry prices, the win
+  rate and the break-even rate; run 1's table shows each bet's round (JST), seconds in, and side.
+  Example (BTC 5m, Nov 6-13, $1 profit per win, $1,000): time 2 min: bets averaged 0.826, won 86.0% vs 83.5%
+  needed; hit 0.75: 0.825, 87.1% vs 83.5%; hit 0.75 with Pay at most 0.80: 0.780, 80.1% vs 79.2% (only slow
+  climbers fill there); side random 0.45-0.55: 0.500, 49.0% vs 51.7%.
+- **Why:** the owner: "how all price same 0.75 for time mode? sometimes 0.52 or 0.98. plz simulate as real for
+  all modes."
+- **How:** `poly_bot/history.py` `History`: closed rounds from Gamma (50 per page, newest first), each round's Up
+  price path from the CLOB prices-history (1-minute points for 5m-1h), cached in `data/history/<COIN>-<tf>.json`,
+  loaded in the background (about 40 s the first time; the page shows progress and asks again every 3 s), topped up
+  when 30 min stale. `simulate.py`: `entry_for` (per mode: side within Min/Max in the Entry window; hit = first
+  side at the Hit price, filled `HIT_FILL` = 60% of the way to the next recorded price, calibrated on the paper
+  bots' real fills, 0.825 simulated vs 0.827 real; time = the leader at Time left within the limits), `SPREAD`
+  1 cent over the mid, `SETTLE_SEC` 170 s before the next bet, `RealFeed` stitching random 12 h stretches;
+  the ladder sizes each bet at its own price. `Controller.simulate` `market` = real / fair.
+- **Tests:** `test_web.test_simulate_real_replays_past_rounds` (fake history: time mode buys the real leader, wins
+  as the rounds went; loading progress is returned), the fair-coin tests now pass `market: fair`.
+
+### History shows Resets and settings changes
+- **What:** the bot's History table lists **Reset**, **Reset paper** and every **settings change** as rows between
+  the bets, at the time they happened: e.g. "↺ Reset: fresh ladder at step 1, profit counted from 0 (was step 3,
+  profit since Reset +$12.34)", "⚙️ Settings: Bet mode side → hit · Hit price 0.75 → 0.7".
+- **Why:** the owner: "if reset or change setting, then plz log on history table."
+- **How:** `trades.append_event` / `read_events`: one JSON line per event in the bot's `events.jsonl` (time in
+  JST like the bets; both networks). `Controller.reset` / `paper_reset` / `put_settings` (with `settings_diff`, only
+  settings that really changed) write them; `status()["events"]` (those since the oldest bet shown);
+  `index.html` `historyTable` merges them by time. The trade log stays bets only, so stats are unchanged.
+- **Tests:** `test_web.test_reset_and_settings_logged_for_history`.
+
+### Simulation: the losing-streak tile says whose streak it is
+- **What:** the tile read "Longest losing streak: 8 in a row" while run 1's table showed 10 losses in a row. 8 was
+  the typical (median) run's longest streak across all runs; run 1 is just one run. The tile is now titled
+  "Longest losing streak (typical run)" and also gives run 1's (the table's) and the worst run's.
+- **Why:** the owner: "why longest losing streak 8. even first 10 losing streak. what's up?"
+- **How:** `simulate` returns `longest_streak_run1`; `index.html` tile text. Losses in a row count across ladder
+  ends (a ladder end doesn't break a streak of losses).
+- **Tests:** existing simulation tests.
+
+### Scrolled tables stay where you scrolled them
+- **What:** the simulation's History (run 1) table (and the History and ladder tables when they scroll) jumped
+  back to the top every 1-2 s; they now keep their scroll position.
+- **Why:** the owner: "if i scroll down then after 1-2s scroll to top again. so i can't see table."
+- **How:** `render()` (which redraws the page every 2 s) saves each `.panel .scroll` box's scrollTop/scrollLeft
+  before the redraw and puts them back after it (after `renderLadder`, which fills the ladder table).
+- **Tests:** none (display only).
+
 ## [1.0.0] - 2026-11-13
 
 ### Bot list: drag to reorder, pin to the top
