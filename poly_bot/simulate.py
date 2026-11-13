@@ -10,7 +10,9 @@ Pure logic, no I/O. Two ways to get each bet's price and result:
           price (prices jump between the bot's 2 s checks; calibrated on the paper bots' real fills), within Pay
           at most;
     time: the leader when Time left is reached, if within Leader at least / Pay at most (else the first later
-          moment it is, until 5 s before the end).
+          moment it is, until 5 s before the end);
+    move: the first second the coin itself (Binance 1 s candles, history.CoinPaths) is Move ($) from the round's
+          start, the way it moved, at the token's price then (within Pay at most).
   The price paid is the path's price plus SPREAD (the ask is a little above the mid). A bet is only placed once the
   previous one is paid out (SETTLE_SEC after its round ends), like the bot. Runs stitch random half-day stretches
   of the history together, so each run sees real streaks but runs differ.
@@ -82,6 +84,29 @@ def entry_for(cfg, rnd: dict, side: Optional[str] = None) -> Optional[tuple]:
                 if fill <= cap + 1e-9:
                     return t, s, fill                                    # (above Pay at most: the bot waits)
             prev = asks
+        return None
+    if mode == "move":
+        # the coin's own path (rnd["coin"], from Binance candles): the first moment it is Move ($) from the start,
+        # then the token's price at that moment (the bot waits while that side costs more than Pay at most)
+        coin = rnd.get("coin")
+        if not coin:
+            return None
+        for t, hi, lo in coin["k"]:
+            if t < opens or t > closes:
+                continue
+            side = "up" if hi >= cfg.move_usd else "down" if -lo >= cfg.move_usd else None
+            if hi >= cfg.move_usd and -lo >= cfg.move_usd:          # both within one candle: the bigger move
+                side = "up" if hi >= -lo else "down"
+            if side is None:
+                continue
+            # the token's price at the next recorded point (pessimistic): the market reprices within seconds of
+            # the coin's move, and 1-minute points can't show how fast; between the two points it looked +10
+            # points better, at the next point +2 to +3 (BTC 5m, Nov 6-13). Re-check against real move fills.
+            later = [p for tp, p in h if tp >= t]
+            up = later[0] if later else h[-1][1]
+            a = _ask(up if side == "up" else 1 - up)
+            if a <= cap + 1e-9:
+                return t, side, a
         return None
     if mode == "time":
         for t in times:

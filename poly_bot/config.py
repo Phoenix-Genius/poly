@@ -73,17 +73,23 @@ FIELDS: dict[str, tuple] = {
                       "What to do after max losses in a row, or when the budget can't pay the next bet. "
                       "stop = halt the bot (you press Reset). reset = accept the loss and restart at step 1."),
     # --- side -------------------------------------------------------------------------------------------
-    "entry_mode": ("side", "select", ["side", "hit", "time"], "Bet mode",
+    "entry_mode": ("side", "select", ["side", "hit", "time", "move"], "Bet mode",
                    "side = pick a side by the Side mode and buy it near 50 cents early in the round (Min/Max price, "
                    "Entry window). hit = no side choice: watch both sides and buy whichever first reaches the Hit "
                    "price (e.g. 0.75), any time in the round. time = when Time left is reached (e.g. 120 s before "
-                   "the end), buy the side that is leading (the dearer one). A higher price wins more often but "
+                   "the end), buy the side that is leading (the dearer one). move = when the coin's price is Move ($) "
+                   "or more above the round's Price To Beat, buy Up; that far below, buy Down. A higher price wins "
+                   "more often but "
                    "pays less: at 0.75 a win pays about 0.24 per share and a loss costs about 0.76, so it has to "
                    "win about 77% to break even, and each martingale step costs about 4x the last."),
     "hit_price": (0.75, "number", None, "Hit price",
                   "hit mode: buy the first side whose price reaches this, e.g. 0.75 = 75 cents."),
+    "move_usd": (50.0, "number", None, "Move ($)",
+                 "move mode: bet once the coin's live price (Chainlink, what the round settles on) is this many "
+                 "dollars above the round's Price To Beat (buy Up) or below it (buy Down), e.g. 50 for BTC. Any time "
+                 "in the round unless Entry window is set."),
     "hit_max_price": (0.0, "number", None, "Pay at most",
-                      "hit and time mode: never pay more than this per share, e.g. 0.80. If the side is dearer, the "
+                      "hit, time and move mode: never pay more than this per share, e.g. 0.80. If the side is dearer, the "
                       "bot waits for its price to come back within it. Empty (or 0) = no limit: buy at whatever the "
                       "price is when the bot sees it (up to 0.99)."),
     "time_left_sec": (120, "int", None, "Time left (s)",
@@ -170,6 +176,10 @@ class BotConfig:
         return self.entry_mode == "time"
 
     @property
+    def move_mode(self) -> bool:
+        return self.entry_mode == "move"
+
+    @property
     def is_live(self) -> bool:
         return self.network == "live"
 
@@ -207,6 +217,8 @@ class BotConfig:
             raise ValueError("Pay at most must be between 0.02 and 0.99, or empty for no limit")
         if self.entry_mode == "hit" and self.hit_max_price and self.hit_max_price < self.hit_price:
             raise ValueError("Pay at most must be at least the Hit price, or empty for no limit")
+        if self.move_usd <= 0:
+            raise ValueError("Move ($) must be more than 0")
         if self.time_left_sec < 10:
             raise ValueError("Time left must be at least 10 seconds")
         if self.time_min_price > 0.98:

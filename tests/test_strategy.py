@@ -307,3 +307,17 @@ class SimulateTest(unittest.TestCase):
             simulate(cfg, 0.5, 100, bets=10_000, runs=10_000)
         with self.assertRaises(ValueError):
             simulate(cfg, 0.5, 0)
+
+
+class MoveModeSimTest(unittest.TestCase):
+    def test_entry_when_the_coin_moved(self):
+        from poly_bot.simulate import entry_for
+        cfg = BotConfig(".", entry_mode="move", move_usd=50)
+        rnd = {"start": 0, "end": 300, "result": "down", "h": [[0, 0.5], [60, 0.4], [120, 0.3], [300, 0.1]],
+               "coin": {"o": 71540.0, "k": [[0, 0, 0], [30, 10, -20], [90, 5, -55], [120, 0, -80]]}}
+        t, side, price = entry_for(cfg, rnd)
+        self.assertEqual((t, side), (90, "down"))                 # the first second it was $50 below
+        self.assertAlmostEqual(price, 0.71)                       # Down = 1 - 0.30 (Up at the next point, 120 s), + 1 cent
+        capped = BotConfig(".", entry_mode="move", move_usd=50, hit_max_price=0.6)
+        self.assertIsNone(entry_for(capped, rnd))                 # Down always above 0.60 once it moved
+        self.assertIsNone(entry_for(cfg, {**rnd, "coin": None}))  # no coin path: no entry

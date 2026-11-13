@@ -36,6 +36,49 @@ class AppTest(unittest.TestCase):
         self.assertIn("Hit price 0.75 → 0.7", ev[0]["text"])
         self.assertIn("was step 1", ev[1]["text"])
 
+    def test_budget_bot_shows_its_own_balance(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        s = ctl.put_settings({"budget_usd": 200})
+        self.assertEqual((s["balance"], s["wallet"]), (200, 1000))       # its budget, not the whole account
+        ctl.bot.ladder.pnl = 12.5
+        ctl.bot.bet = {"slug": "x", "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8, "cost": 8.1,
+                       "fee": 0.1, "start": 1.8e9, "end": 1.8e9 + 300, "url": "u", "token": "x"}
+        self.assertAlmostEqual(ctl.status()["balance"], 200 + 12.5 - 8.1, places=2)
+        ctl.bot.bet = None
+        self.assertEqual(ctl.put_settings({"budget_usd": 0})["balance"], 1000)   # no budget: the account
+
+    def test_reset_only_ladder_keeps_profit_and_counts(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        lad = ctl.bot.ladder
+        lad.step, lad.streak_lost, lad.pnl, lad.wins, lad.losses = 3, 55.55, -30.81, 10, 6
+        ctl.bot.halted, ctl.bot.halt_message = "ladder", "Ladder ended at step 3"
+        s = ctl.reset_ladder()
+        self.assertEqual((s["step"], s["streak_lost"], s["pnl"], s["wins"], s["losses"]), (1, 0, -30.81, 10, 6))
+        self.assertEqual(ctl.bot.halted, "")                      # Start works again
+        self.assertIn("Reset only ladder", s["events"][-1]["text"])
+        s = ctl.reset()
+        self.assertEqual((s["pnl"], s["wins"], s["losses"]), (0, 0, 0))
+
+    def test_ladder_shows_the_open_bet_as_placed(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        ctl.put_settings({"entry_mode": "hit", "hit_price": 0.75, "base_profit_usd": 2})
+        lad = ctl.bot.ladder
+        lad.step, lad.streak_lost = 2, 15.83
+        ctl.bot.bet = {"slug": "btc-updown-5m-1800000000", "title": "t", "side": "down", "step": 2,
+                       "shares": 111.34, "price": 0.83, "cost": 93.51, "fee": 1.1, "start": 1.8e9,
+                       "end": 1.8e9 + 300, "url": "u", "token": "x"}
+        view = ctl.status()["ladder"]
+        row = next(r for r in view["rows"] if r.get("open"))
+        self.assertEqual((row["step"], row["shares"], row["cost"], row["price"]), (2, 111.34, 93.51, 0.83))
+        self.assertAlmostEqual(row["win_profit"], 111.34 - 93.51 - 15.83, places=2)
+        self.assertEqual(view["price"], 0.83)                    # the next steps at the real price
+        nxt = next(r for r in view["rows"] if r["step"] == 3)
+        self.assertAlmostEqual(nxt["lost_total"] - nxt["cost"], 15.83 + 93.51, places=1)
+        ctl.bot.bet = None
+
     def test_order_and_pins(self):
         for coin in ("BTC", "ETH", "SOL"):
             self.app.create({"coin": coin, "timeframe": "5m"})
@@ -128,7 +171,7 @@ class AppTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ctl.put_settings({"min_price": 0.6})                # must be below the max price
         s = ctl.put_settings({"paper_balance_usd": 5000})          # applies at once, no Reset paper needed
-        self.assertEqual((s["balance"], s["start_balance"]), (5000, 5000))
+        self.assertEqual((s["wallet"], s["start_balance"]), (5000, 5000))
         with self.assertRaises(ValueError):
             ctl.put_settings({"target_steps": 8, "max_steps": 5})   # max losses below steps to survive
         plan = ctl.plan({"target_steps": 4, "price": 0.55})   # max price 0.55
@@ -153,7 +196,7 @@ class AppTest(unittest.TestCase):
         self.assertNotIn("k-secret", json.dumps(s))
         self.assertNotIn("ab" * 32, json.dumps(s))
         s = ctl.put_settings({"network": "paper"})
-        self.assertEqual(s["balance"], 1000)
+        self.assertEqual((s["wallet"], s["balance"]), (1000, 50))          # the account, and the bot's budget
 
     def test_missing_timeframe_refused(self):
         self.pm.missing.add(("SOL", "daily"))

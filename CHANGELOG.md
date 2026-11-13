@@ -4,6 +4,101 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-14
+
+### History: a log row comes after the bet that caused it
+- **What:** when a log row (e.g. "Ladder ended") and a bet have the same second, the log row is shown as the newer.
+- **Why:** the owner: "reset log should be after loss log."
+- **How:** `historyTable`'s sort breaks a same-time tie in favour of the event.
+- **Tests:** none (a page-only sort).
+
+### Account balance tile
+- **What:** on a bot with a Budget, a "🏦 Account balance" tile after the Budget balance shows the whole account.
+- **Why:** the owner: "show total balance for account after budget card."
+- **How:** status `wallet`.
+- **Tests:** test_web `test_budget_bot_shows_its_own_balance` checks `wallet`.
+
+### A bot with a Budget shows its own balance
+- **What:** when Budget is set, the bot's Balance (tile "💰 Budget balance", bot card, History's Balance column) is
+  its own money: Budget + Profit since Reset - the open bet. Several bots on one Polymarket account each show only
+  theirs, not the account's total. Without a Budget it's the account's balance as before. If the account holds less
+  than the bot's balance, the tile says "the account has only $X". Reset puts it back to the Budget. Right after it,
+  a "🏦 Account balance" tile shows the whole account (only on bots with a Budget).
+- **Why:** the owner: "when set budget, then show balance as the budget. don't show total balance for each bot.
+  each bot play with their budget." / "show total balance for account after budget card."
+- **How:** `Bot.own_balance()`; `Controller.wallet()` is the account (still caps what a bet may cost); status
+  has `wallet` too.
+- **Tests:** test_web `test_budget_bot_shows_its_own_balance`.
+
+### History logs when the ladder ends
+- **What:** when the next bet doesn't fit, History gets a red 🪜 row: "Ladder ended at step N: <why> The bot
+  stopped (streak lost $X); press Reset", or with When the ladder ends = reset, "... Reset by itself: the streak's
+  $X loss is accepted, back to step 1."
+- **Why:** the owner: "when the ladder ends, log on history table." / "when reset".
+- **How:** `Bot._ladder_end` writes a `ladder_end` event (once per stop) to events.jsonl.
+- **Tests:** test_engine ladder-end stop and reset-mode tests check the event.
+
+### Reset has two options: Reset, and Reset only ladder
+- **What:** the ↺ Reset button opens a menu (like Stop's). **↺ Reset** is as before: a fresh ladder at step 1 with
+  Profit since Reset and Wins / Losses back to 0. **🪜 Reset only ladder** goes back to step 1 (the streak's loss is
+  accepted, not won back) and clears a "Ladder ended" stop, but keeps Profit since Reset and Wins / Losses. Both are
+  logged in History.
+- **Why:** the owner: "reset has 2 options "reset" and "reset only ladder"(profit count and wins count remain)".
+- **How:** `Bot.reset(keep_counts=True)` uses `Ladder.restart()`; new `POST /api/bots/<id>/reset_ladder`.
+- **Tests:** test_web `test_reset_only_ladder_keeps_profit_and_counts`.
+
+### The site needs an email sign-in and the admin's approval; no guests
+- **What:** poly.zodypay.com shows only the sign-in screen until you sign in with your email (a 6-digit code, no
+  password). There is no "Continue without email" and no guest account any more; a browser that had a guest cookie
+  is signed out. A **new email's account waits for the admin's approval**: after signing in it sees "waiting for
+  the admin's approval" (with Check again / Sign out) and can't use anything. The admins (ADMIN_EMAILS,
+  onetodaysoft@proton.me) get an email "Approve <email>?" on that first sign-in, and the 👥 Users button shows
+  "(1 waiting)"; the Users list puts waiting accounts first with **✅ Approve** / **Reject**, and the others with
+  Disable / Enable. Accounts that already had an email were approved by the upgrade; admins never wait.
+- **Why:** the owner: "lock this site with email login. not allowed guest mode." / "it should be allowed by admin -
+  onetodaysoft@proton.me".
+- **How:** `hosted.py`: `users.approved` column (migration approves existing email accounts); `Hosted.is_approved`
+  (approved or admin); `Handler.user` is None for guests and unapproved accounts, `/api/me` answers 401
+  `{"signin"}` or 403 `{"pending", "email"}`; `send_approval_request` (Resend, best effort, on the first sign-in);
+  `POST /api/admin/users/<id>/approve`; `admin_users` lists email accounts with `approved` / `admin`. Unapproved
+  and guest accounts' bots aren't loaded at start. `index.html`: sign-in screen can't be closed, a pending step,
+  `usersHtml` with Approve / Reject / Disable / Enable, the waiting count refreshed every minute for admins.
+- **Tests:** `test_hosted.test_email_sign_in_is_required`, `test_new_accounts_wait_for_the_admin` (admin emailed
+  once, 403 until approved, only an admin can approve, works right after), `test_an_old_guest_cookie_is_signed_out`.
+
+### Ladder shows the open bet as it was placed
+- **What:** while a bet is open, its row in the Martingale ladder (marked "open") shows the real bet: price, shares,
+  cost and side, the same as Current bet. The steps after it are priced at that bet's real price (or the settings'
+  price when dearer), and the note says so. Before, the row showed a forecast at the settings' price (e.g. $57.43
+  at 0.75 while the real step 2 bet was $93.51 at 0.83).
+- **Why:** the owner: "why current bet info and ladder table info different?"
+- **How:** `Controller._ladder`: with an open bet at the current step, `ladder_view` from the next step with the
+  bet's cost added to the streak's loss, and the bet inserted as an `open` row; `fits` counts it. `index.html`
+  renders the open row and the new note.
+- **Tests:** `test_web.test_ladder_shows_the_open_bet_as_placed`.
+
+### Move mode: bet when the coin moves $X from the Price To Beat
+- **What:** a fourth Bet mode, **move**: when the coin's live price (Chainlink, what the rounds settle on) is
+  **Move ($)** (default 50) above the round's **Price To Beat**, the bot buys Up; that far below, Down. Any time
+  in the round (unless Entry window is set), within **Pay at most**. The status line shows "BTC $71,494.64 is
+  $45.44 below the Price To Beat $71,540.08; betting at $50", and while a move bet runs the Current bet panel shows
+  the Price To Beat and the coin's price now (▲/▼). The simulation replays it too.
+  Research (BTC 5m, Nov 6-13, 2,016 rounds): the side the coin moved toward won 73% ($25), 82% ($50), 88% ($75),
+  91% ($100) of the time; against the token's price at the next recorded minute the edge was +2 to +3 points
+  (+10 points against the price in between: how fast Polymarket reprices decides it).
+- **Why:** the owner: "current price differ from beat price. if set 50 then when reach $50 differ from start then
+  bet side." / "no new mode about price diff reach i asked. plz add a new mode".
+- **How:** `poly_bot/prices.py` `PriceFeed`: one socket to Polymarket's real-time data (`crypto_prices_chainlink`,
+  e.g. `btc/usd`, about one price a second, plus the last minute on subscribing; the filter must be written
+  without spaces or only the backfill comes), keeping 15 minutes per coin; a round's Price To Beat is the price at
+  its start second, else Polymarket's crypto-price endpoint (rate-limited: asked at most once a minute per round).
+  `Polymarket.coin_prices`; `config` `entry_mode` += "move", `move_usd`; `Bot._enter_move`; the bet keeps
+  `price_to_beat`. Simulation: `history.CoinPaths` downloads the coin's 1-second Binance candles for the past
+  rounds (only the seconds that set a new high/low: ~0.8 MB a week), `simulate.entry_for` move rule at the token's
+  next recorded price (pessimistic).
+- **Tests:** `test_engine` move mode waits until $50, bets Down below / Up above, respects Pay at most;
+  `test_strategy.MoveModeSimTest`.
+
 ## [1.1.0] - 2026-11-13
 
 ### Simulation replays real past rounds for every Bet mode

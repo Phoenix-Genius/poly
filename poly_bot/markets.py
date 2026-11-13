@@ -126,8 +126,10 @@ class Polymarket:
         self._series: dict[tuple, Optional[str]] = {}
         self._results: dict[str, str] = {}       # slug -> result, final once known
         self._lock = threading.Lock()
+        from .prices import PriceFeed
         from .volume import VolumeFeed
         self.volumes = VolumeFeed(clock)         # real-time traded volume per round (one socket for every bot)
+        self.coin_prices = PriceFeed(clock)      # live coin prices and Price To Beat, for the move mode
 
     def series_id(self, coin: str, timeframe: str) -> str:
         key = (coin.upper(), timeframe)

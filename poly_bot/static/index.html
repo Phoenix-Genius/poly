@@ -239,6 +239,7 @@
   tr.played td { color: var(--muted); }
   tr.ev td { background: var(--amber-bg); color: var(--amber); font-weight: 600; white-space: normal; }
   tr.ev-settings td { background: var(--active-bg); color: var(--accent); }
+  tr.ev-ladder_end td { background: var(--red-bg); color: var(--red); }
   .scroll { overflow-x: auto; }
   .ladder-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 13px; }
   #ladderPanel.preview { --sec: var(--accent); }
@@ -306,13 +307,15 @@
 </dialog>
 <div id="signin"><div class="box">
   <h2>🎲 Poly Martingale</h2>
-  <p class="muted" style="margin:0 0 14px">Optional: sign in with your email to reach your bots from any browser. Your bots made in this browser stay yours.</p>
+  <p class="muted" style="margin:0 0 14px">Sign in with your email: we send you a 6-digit code, no password. Your bots are kept with your email, so you reach them from any browser.</p>
+  <div id="stepPending" hidden><p style="margin:0 0 10px">✅ Signed in as <b id="pendEmail" data-no-i18n></b>.</p>
+    <p style="margin:0 0 12px">⏳ Your account is <b>waiting for the admin's approval</b>. You'll be able to use the site once it's approved: reload this page then.</p>
+    <div class="actions"><button class="btn" onclick="location.reload()">↻ Check again</button><button class="btn" id="pendOut">Sign out</button></div></div>
   <div id="stepEmail"><div class="field"><label>Email</label><input id="siEmail" type="email" autocomplete="email" placeholder="you@example.com"></div>
     <button class="btn primary" id="siSend">✉️ Send me a sign-in code</button></div>
   <div id="stepCode" hidden><p style="margin:0 0 8px">We sent a 6-digit code to <b id="siTo" data-no-i18n></b>.</p>
     <div class="field"><label>Code</label><input id="siCode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></div>
     <div class="actions"><button class="btn primary" id="siVerify">Sign in</button><button class="btn" id="siBack">← Other email</button></div></div>
-  <div class="actions" style="margin-top:12px"><button class="btn" id="siClose">Continue without email</button></div>
   <p class="neg" id="siErr" style="margin:10px 0 0;font-size:13px"></p>
   <p class="credit" style="margin:14px 0 0">Not available for live trading where Polymarket doesn't allow it (e.g. US, UK, France, Germany, Australia). Martingale can lose your whole budget. <a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></p>
 </div></div>
@@ -349,10 +352,8 @@ async function api(path, body) {
   const r = await fetch(path, opt);
   const data = await r.json().catch(() => ({error: "bad answer"}));
   if (r.status === 401 && HOSTED && !path.startsWith("/api/auth/")) {
-    // the session cookie is gone: reload once to get a guest account; if cookies are blocked, say so instead
-    let last = 0; try { last = +sessionStorage.getItem("reloaded") || 0; } catch (e) {}
-    if (Date.now() - last > 30000) { try { sessionStorage.setItem("reloaded", Date.now()); } catch (e) {} location.reload(); }
-    throw new Error("This site needs cookies to keep your bots. Allow cookies for poly.zodypay.com and reload.");
+    showSignIn();                      // signed out (or the session ended): only the sign-in screen
+    throw new Error("Sign in with your email.");
   }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
@@ -470,7 +471,7 @@ function renderBots() {
                 title="${b.pinned ? "Unpin" : "Pin to the top"}" aria-label="${b.pinned ? "Unpin" : "Pin"} ${esc(b.name)}">📌</button>
         <span class="chip ${b.network === "live" ? "live" : "paper"}">${b.network === "live" ? "LIVE" : "paper"}</span></div>
       <div class="bi-line">${esc(b.coin)} · ${esc(b.timeframe)} rounds</div>
-      <div class="bi-money"><span class="bal" title="${b.network === "live" ? "pUSD balance" : "Paper balance"}">${money(b.balance)}</span>
+      <div class="bi-money"><span class="bal" title="${b.budget ? "This bot's budget balance" : b.network === "live" ? "pUSD balance" : "Paper balance"}">${money(b.balance)}</span>
         <span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
       <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
       <div class="bi-status"><span class="txt ${b.halted ? "halt" : ""}" title="${esc(b.message)}">${esc(b.message || "")}</span>${act}</div>
@@ -526,7 +527,7 @@ const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
-  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "hit_max_price", "side_mode", "first_side"]},
+  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "move_usd", "hit_max_price", "side_mode", "first_side"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
 ];
 const WIDE = ["bot_name"];
@@ -608,6 +609,7 @@ function showFields() {
   for (const k of ["side_mode", "min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
   $('.field[data-key="hit_price"]')?.classList.toggle("hide", m !== "hit");
   for (const k of ["time_left_sec", "time_min_price"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", m !== "time");
+  $('.field[data-key="move_usd"]')?.classList.toggle("hide", m !== "move");
   $('.field[data-key="hit_max_price"]')?.classList.toggle("hide", side);
   $('.field[data-key="entry_window_sec"]')?.classList.toggle("hide", m === "time");
   $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
@@ -628,10 +630,10 @@ function renderSettingsHead(v) {
     : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
     up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
-  const hit = v.entry_mode === "hit", time = v.entry_mode === "time";
+  const hit = v.entry_mode === "hit", time = v.entry_mode === "time", move = v.entry_mode === "move";
   const left = n(v.time_left_sec), leftTxt = left % 60 ? `${left} s` : `${left / 60} min`;
   const cap = n(v.hit_max_price) > 0 ? `max ${n(v.hit_max_price).toFixed(2)}` : "no limit";
-  const win = time ? `${leftTxt} left` : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : hit ? "whole round" : "auto";
+  const win = time ? `${leftTxt} left` : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : hit || move ? "whole round" : "auto";
   $("#summary").innerHTML = `<div class="chips pairs">` + [
     chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd"),
     chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
@@ -640,9 +642,10 @@ function renderSettingsHead(v) {
     chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps"),
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
     hit ? chip("💲", "Hit", `${n(v.hit_price).toFixed(2)} · ${cap}`, "hit_price")
+      : move ? chip("💲", "Move", `$${n(v.move_usd).toLocaleString()} · ${cap}`, "move_usd")
       : time ? chip("💲", "Leader", `${n(v.time_min_price) > 0 ? n(v.time_min_price).toFixed(2) + "+" : "any"} · ${cap}`, "time_min_price")
       : chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
-    hit ? chip("🔁", "Side", "first to hit", "entry_mode") : time ? chip("🔁", "Side", "leader", "entry_mode") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
+    hit ? chip("🔁", "Side", "first to hit", "entry_mode") : time ? chip("🔁", "Side", "leader", "entry_mode") : move ? chip("🔁", "Side", "the way it moved", "entry_mode") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
     chip("⏱️", "Entry", win, "entry_window_sec"),
   ].join("") + `</div>`;
 }
@@ -688,6 +691,7 @@ function modeTile(v) {
   const m = v.entry_mode, cap = +v.hit_max_price > 0 ? ` · max ${(+v.hit_max_price).toFixed(2)}` : "";
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
   if (m === "hit") return `Hit ${(+v.hit_price).toFixed(2)} ${small("first side to reach it" + cap)}`;
+  if (m === "move") return `Move $${(+v.move_usd).toLocaleString()} ${small("from the Price To Beat, the way it moved" + cap)}`;
   if (m === "time") {
     const l = +v.time_left_sec, left = l % 60 ? `${l} s` : `${l / 60} min`;
     return `Time · ${left} ${small("left, the leader" + (+v.time_min_price > 0 ? ` at ${(+v.time_min_price).toFixed(2)}+` : "") + cap)}`;
@@ -713,14 +717,15 @@ function render() {
       <span style="flex:1"></span>
       <div class="actions">
         ${running ? `<button class="btn stop" data-act="stopmenu" aria-haspopup="menu">■ ${s.stop_after_win ? "Stop after win…" : "Stop"} ▾</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
-        <button class="btn" data-act="reset" ${running ? "disabled" : ""} title="Fresh ladder at step 1, profit back to 0">↺ Reset</button>
+        <button class="btn" data-act="resetmenu" aria-haspopup="menu" ${running ? "disabled" : ""} title="Reset, or reset only the ladder">↺ Reset ▾</button>
         ${s.network === "live" ? "" : `<button class="btn" data-act="paper_reset" ${running ? "disabled" : ""} title="Fresh paper account with the Paper balance">🧾 Reset paper</button>`}
         <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>
       </div>
       <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the next win</b>' : ""}</div>
     </div>
     <div class="tiles">
-      <div class="tile" style="--tone:var(--accent)"><div class="k">💰 ${s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div></div>
+      <div class="tile" style="--tone:var(--accent)"><div class="k" title="${s.settings.budget_usd > 0 ? "This bot's own money: Budget + profit since Reset - the open bet" : "The whole account"}">💰 ${s.settings.budget_usd > 0 ? "Budget balance" : s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${s.settings.budget_usd > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
+      ${s.settings.budget_usd > 0 ? `<div class="tile" style="--tone:var(--muted)"><div class="k" title="Everything in this Polymarket account, shared by every bot that uses it">🏦 ${s.network === "live" ? "Account balance" : "Paper account"}</div><div class="v num">${s.wallet == null ? "–" : money(s.wallet)}</div></div>` : ""}
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
@@ -736,7 +741,7 @@ function render() {
     ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
   `;
   for (const b of page.querySelectorAll("[data-act]")) b.onclick = () => b.dataset.act === "stopmenu"
-    ? stopMenu(b, current, status.stop_after_win) : doAct(b.dataset.act);
+    ? stopMenu(b, current, status.stop_after_win) : b.dataset.act === "resetmenu" ? resetMenu(b) : doAct(b.dataset.act);
   for (const h of page.querySelectorAll("[data-fold]")) h.onclick = () => {
     const id = h.dataset.fold; folded.has(id) ? folded.delete(id) : folded.add(id);
     localStorage.setItem("folded", JSON.stringify([...folded])); h.parentElement.classList.toggle("folded");
@@ -789,6 +794,12 @@ function winNow(side, mine, upChance) {
       <div class="big num">${p}%</div></div>
     <div class="both">${one("up", upChance)} · ${one("down", 1 - upChance)}<div class="chance"><b style="width:${(upChance * 100).toFixed(1)}%"></b></div></div></div>`;
 }
+// move mode: the coin's live price against the round's Price To Beat (like the round's page on Polymarket)
+function coinVsBeat(coin, now, beat) {
+  const d = now - beat, c = d >= 0 ? "pos" : "neg";
+  return `<div class="bet" style="margin-top:8px"><div><div class="k">Price To Beat</div><div class="v num">${moneyFull(beat)}</div></div>
+    <div><div class="k">${esc(coin)} now</div><div class="v num">${moneyFull(now)} <small class="${c}">${d >= 0 ? "▲" : "▼"} ${moneyFull(Math.abs(d))}</small></div></div></div>`;
+}
 function betPanel(s) {
   const b = s.bet;
   if (!b) return panel("betPanel", "Current bet", "none", `<p class="muted" style="margin:0">${esc(s.running ? s.message : "No open bet.")}</p>`);
@@ -806,6 +817,7 @@ function betPanel(s) {
       <div><div class="k">Round volume${b.volume?.lagging ? " (Polymarket, delayed)" : b.volume?.partial ? ` since ${new Date(b.volume.since * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})}` : ""}</div>
         <div class="v num">${b.volume == null ? "–" : money(b.volume.usd)}${b.volume?.trades ? ` <small class="muted" style="font-weight:400">${b.volume.trades.toLocaleString()} trades · ${sharesTxt(b.volume.shares)} sh</small>` : ""}</div></div>
     </div>
+    ${b.price_to_beat && b.coin_price && !ended ? coinVsBeat(s.coin, b.coin_price, b.price_to_beat) : ""}
     ${mid == null || ended ? "" : winNow(b.side, mid, upChance)}`);
 }
 // --- simulation (like the hyperliquid bot's): these settings over many bets in a fair market ---
@@ -830,7 +842,7 @@ function simPanelBody() {
       ${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
       ${real ? "" : inp("win", "Win chance (%)", "= price")}
       <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? (simLoading ? "Loading past rounds…" : "Simulating…") : "Run simulation"}</button>
-      ${simLoading ? `<span class="simhelp">${simLoading.total ? `Downloading past rounds from Polymarket: ${simLoading.done.toLocaleString()} of ${simLoading.total.toLocaleString()}` : "Listing past rounds…"} (once; later only new rounds)</span>` : ""}</form>
+      ${simLoading ? `<span class="simhelp">${simLoading.total ? `Downloading ${simLoading.what ? esc(simLoading.what) + " for the" : ""} past rounds: ${simLoading.done.toLocaleString()} of ${simLoading.total.toLocaleString()}` : "Listing past rounds…"} (once; later only new rounds)</span>` : ""}</form>
     <div id="simOut" style="opacity:${simBusy && simResult ? .45 : 1}">${simResult ? simHtml(simResult) : ""}</div>`;
 }
 function wireSim() {
@@ -943,20 +955,23 @@ function renderLadder() {
   $("#ladderSum").innerHTML = view.lost > 0
     ? `now at step ${view.step}: ${view.recover_wins > 1 ? "still to win back" : "this streak lost"} ${money(view.lost)}${view.recover_wins > 1 ? ` over ${view.wins_left} win${view.wins_left > 1 ? "s" : ""}` : ""} · ${view.fits} more bets fit in the ${money(view.left)} left`
     : `${view.fits} losses in a row fit in ${money(view.budget)}`;
-  $("#ladderNote").textContent = `Every bet priced at ${(+view.price).toFixed(2)} per share, the most these settings pay` +
-    (usePreview ? " (preview of unsaved settings)" : "");
+  $("#ladderNote").textContent = (view.open_price != null && !usePreview
+    ? `Step ${view.step} is the open bet as placed, at ${(+view.open_price).toFixed(2)}; the next steps are priced at ${(+view.price).toFixed(2)} per share`
+    : `Every bet priced at ${(+view.price).toFixed(2)} per share`) + (usePreview ? " (preview of unsaved settings)" : "") +
+    ". The bot sizes each bet at the real price when it buys: a dearer price needs a bigger bet.";
   const a = view.auto;
   const autoNote = !a ? "" : a.base == null
     ? `<p class="neg" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: the budget can't pay for ${a.steps} bets in a row even at 5 shares each.</p>`
     : `<p class="muted" style="margin:0 0 6px;font-size:12px">Steps to survive ${a.steps}: ${a.label} <b>${money(a.base)}</b> for this streak, so ${a.steps} losses in a row fit even if every bet costs ${a.price.toFixed(2)}.</p>`;
   el.innerHTML = autoNote + `${view.lost > 0 ? `<p class="muted" style="margin:0 0 6px;font-size:12px">${view.recover_wins > 1 ? `Recover over ${view.recover_wins} wins: the next win pays back ${money(view.lost / view.wins_left)} of the ${money(view.lost)} still owed plus your profit; the rest is carried to the next bets. A loss spreads the debt over ${view.recover_wins} wins again.` : `Each bet is sized so one win pays back the ${money(view.lost)} this streak lost plus your profit.`} A cheaper price needs a smaller bet.</p>` : ""}<table><tr><th class="l">Step</th><th>Shares</th><th>Bet costs</th><th>A win earns</th><th>Lost if it loses</th></tr>
-    ${view.rows.map(r => r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}${r.left_after_win > 0.005 ? ` <small class="muted">· ${money(r.left_after_win)} left</small>` : ""}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
+    ${view.rows.map(r => r.open ? `<tr class="cur"><td class="l">${r.step} <small class="muted">open</small></td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num pos">${money(r.win_profit, true)}${r.left_after_win > 0.005 ? ` <small class="muted">· ${money(r.left_after_win)} left</small>` : ""}</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : r.played ? `<tr class="played"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)} <small class="muted">${sideHtml(r.side)} at ${r.price.toFixed(2)}</small></td><td class="num neg">❌ lost</td><td class="num neg">${money(-r.lost_total)}</td></tr>` : `<tr class="${r.step === status.step && !(usePreview && formDirty) ? "cur" : ""} ${r.fits ? "" : "over"}"><td class="l">${r.step}</td><td class="num">${sharesTxt(r.shares)}</td><td class="num">${money(r.cost)}</td><td class="num pos">${money(r.win_profit, true)}${r.left_after_win > 0.005 ? ` <small class="muted">· ${money(r.left_after_win)} left</small>` : ""}</td><td class="num neg">${money(-r.lost_total)}</td></tr>`).join("")}
   </table>`;
 }
 // the bets, newest first, with Resets and settings changes in between (by time)
 function historyTable(trades, events = []) {
   if (!trades.length && !events.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
-  const rows = [...trades, ...events.map(e => ({...e, event: true}))].sort((a, b) => (b.time > a.time) - (b.time < a.time));
+  // newest first; in the same second an event (e.g. "Ladder ended" after the loss that ended it) is the newer one
+  const rows = [...trades, ...events.map(e => ({...e, event: true}))].sort((a, b) => (b.time > a.time) - (b.time < a.time) || (b.event ? 1 : 0) - (a.event ? 1 : 0));
   const dash = '<span class="muted">–</span>';
   const slip = t => t.slippage === "" || t.slippage == null ? dash : (+t.slippage ? money(-t.slippage) : "$0.00");
   const costs = t => {                     // fee + slippage as a share of the bet
@@ -968,7 +983,7 @@ function historyTable(trades, events = []) {
       <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
       <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
-    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
+    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
       <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
@@ -1000,10 +1015,28 @@ function stopMenu(btn, id, afterWin) {
     loadBots();
   };
 }
-document.addEventListener("click", e => { if (!e.target.closest("#stopMenu, [data-act=stopmenu], .bi-act")) closeStopMenu(); });
+// the menu under Reset: everything back to 0, or only the ladder back to step 1 (profit and wins/losses kept)
+function resetMenu(btn) {
+  if ($("#stopMenu")?.dataset.for === "reset") return closeStopMenu();
+  closeStopMenu();
+  const m = document.createElement("div");
+  m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = "reset"; m.setAttribute("role", "menu");
+  m.style.borderColor = "var(--accent)";
+  const items = [["reset", "↺ Reset", "Fresh ladder at step 1; Profit since Reset and Wins / Losses back to 0"],
+    ["reset_ladder", "🪜 Reset only ladder", "Back to step 1; Profit since Reset and Wins / Losses stay"]];
+  m.innerHTML = items.map(([a, t, h]) => `<button type="button" role="menuitem" data-a="${a}" title="${esc(h)}">${t}<small>${esc(h)}</small></button>`).join("");
+  document.body.append(m);
+  const r = btn.getBoundingClientRect();
+  m.style.minWidth = Math.max(r.width, 240) + "px";
+  m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + "px";
+  m.style.top = (r.bottom + 2 + m.offsetHeight < innerHeight ? r.bottom + 2 : r.top - 2 - m.offsetHeight) + "px";
+  m.onclick = e => { const a = e.target.closest("button")?.dataset.a; if (!a) return; closeStopMenu(); doAct(a); };
+}
+document.addEventListener("click", e => { if (!e.target.closest("#stopMenu, [data-act=stopmenu], [data-act=resetmenu], .bi-act")) closeStopMenu(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeStopMenu(); });
 async function doAct(a) {
-  const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset goes back to 0 (the history is kept).",
+  const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset and Wins / Losses go back to 0 (the history is kept).",
+    reset_ladder: `Back to step 1?${status.streak_lost ? ` This streak's ${moneyFull(status.streak_lost)} loss is accepted (not won back).` : ""} Profit since Reset and Wins / Losses stay.`,
     paper_reset: `Reset the paper account to ${moneyFull(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
     delete: `Delete bot "${status.name}" with its settings, history and log?`,
     start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${status.settings.budget_usd > 0 ? moneyFull(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + moneyFull(status.balance) + " can be lost"}\nFirst bet: about ${moneyFull(status.ladder.rows[status.step - 1]?.cost)}` : ""};
@@ -1064,26 +1097,55 @@ $("#siEmail").addEventListener("keydown", e => { if (e.key === "Enter") sendCode
 $("#siVerify").onclick = verifyCode;
 $("#siCode").addEventListener("keydown", e => { if (e.key === "Enter") verifyCode(); });
 $("#siCode").addEventListener("input", e => { if (e.target.value.trim().length === 6) verifyCode(); });
-$("#siClose").onclick = () => $("#signin").classList.remove("on");
 $("#addEmail").onclick = showSignIn;
 $("#siBack").onclick = () => { $("#stepEmail").hidden = false; $("#stepCode").hidden = true; };
+$("#pendOut").onclick = async () => { try { await api("/api/auth/logout", {}); } catch (e) {} location.reload(); };
 $("#signOut").onclick = async () => { try { await api("/api/auth/logout", {}); } catch (e) {} location.reload(); };
-$("#usersBtn").onclick = async () => {
+// admins: the user list, with Approve for accounts waiting and Disable / Enable for the rest
+function usersHtml(users) {
+  const act = u => u.admin ? '<span class="muted">admin</span>'
+    : !u.approved ? `<button class="btn go" data-uact="approve" data-uid="${u.id}">✅ Approve</button> <button class="btn" data-uact="disable" data-uid="${u.id}">Reject</button>`
+    : u.disabled ? `<button class="btn" data-uact="enable" data-uid="${u.id}">Enable</button>`
+    : `<button class="btn" data-uact="disable" data-uid="${u.id}">Disable</button>`;
+  const state = u => u.disabled ? '<span class="neg">disabled</span>' : !u.approved ? '<b style="color:var(--amber)">⏳ waiting</b>' : '<span class="pos">approved</span>';
+  const rows = [...users].sort((a, b) => (a.approved || a.disabled) - (b.approved || b.disabled));   // waiting first
+  return `<table><tr><th class="l">Email</th><th class="l">Status</th><th class="l">Country</th><th>Bots</th><th>Running</th><th>Live running</th><th class="l">Last sign-in</th><th class="l"></th></tr>
+    ${rows.map(u => `<tr><td class="l" data-no-i18n>${esc(u.email)}</td><td class="l">${state(u)}</td><td class="l">${esc(u.country)}</td><td class="num">${u.bots}</td><td class="num">${u.running}</td><td class="num">${u.live_running}</td><td class="l num">${u.last_login ? new Date(u.last_login * 1000).toLocaleString() : "–"}</td><td class="l">${act(u)}</td></tr>`).join("")}</table>`;
+}
+async function showUsers() {
   try {
     const d = await api("/api/admin/users");
-    $("#usersTable").innerHTML = `<table><tr><th class="l">Email</th><th class="l">Country</th><th>Bots</th><th>Running</th><th>Live running</th><th class="l">Last sign-in</th></tr>
-      ${d.users.map(u => `<tr><td class="l" data-no-i18n>${esc(u.email)}${u.disabled ? " (disabled)" : ""}</td><td class="l">${esc(u.country)}</td><td class="num">${u.bots}</td><td class="num">${u.running}</td><td class="num">${u.live_running}</td><td class="l num">${u.last_login ? new Date(u.last_login * 1000).toLocaleString() : "–"}</td></tr>`).join("")}</table>`;
-    $("#usersDlg").showModal();
+    $("#usersTable").innerHTML = usersHtml(d.users);
+    const waiting = d.users.filter(u => !u.approved && !u.disabled).length;
+    $("#usersBtn").textContent = waiting ? `👥 Users (${waiting} waiting)` : "👥 Users";
+    return d;
   } catch (e) { toast(e.message); }
-};
+}
+$("#usersBtn").onclick = async () => { if (await showUsers()) $("#usersDlg").showModal(); };
+$("#usersTable").addEventListener("click", async e => {
+  const b = e.target.closest("[data-uact]"); if (!b) return;
+  const email = b.closest("tr").querySelector("td").textContent;
+  if (b.dataset.uact === "disable" && !confirm(`${b.textContent.trim()} ${email}? Their bots stop and they can't sign in.`)) return;
+  b.disabled = true;
+  try { const d = await api(`/api/admin/users/${b.dataset.uid}/${b.dataset.uact}`, {}); $("#usersTable").innerHTML = usersHtml(d.users); showUsers(); }
+  catch (err) { toast(err.message); }
+});
 
 (async () => {
   if (HOSTED) {
-    try { me = await api("/api/me"); }                 // a first visit becomes a guest: no sign-in needed
-    catch (e) { $("#page").innerHTML = `<div class="empty neg">${esc(e.message)}</div>`; return; }
+    // email sign-in is required (401 shows the sign-in screen); a new account waits for the admin (403 pending)
+    const r = await fetch("/api/me"), d = await r.json().catch(() => ({}));
+    if (r.status === 403 && d.pending) {
+      $("#signin").classList.add("on"); $("#stepEmail").hidden = true; $("#stepCode").hidden = true;
+      $("#stepPending").hidden = false; $("#pendEmail").textContent = d.email; return;
+    }
+    if (r.status === 401) { showSignIn(); return; }
+    if (!r.ok) { $("#page").innerHTML = `<div class="empty neg">${esc(d.error || r.statusText)}</div>`; return; }
+    me = d;
     $("#whoBox").hidden = false; $("#dbipCredit").hidden = false;
     $("#who").textContent = me.guest ? "Guest" : me.email;
     $("#usersBtn").hidden = !me.admin; $("#addEmail").hidden = !me.guest; $("#signOut").hidden = me.guest;
+    if (me.admin) { showUsers(); setInterval(showUsers, 60000); }   // "Users (1 waiting)" when someone asks
   }
   schema = await api("/api/schema");
   wireBotOrder();

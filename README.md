@@ -134,7 +134,10 @@ last 2,016 rounds, about 7 days of 5m, with the Up price minute by minute; downl
   of the way from the Hit price to the next recorded price (the paper bots' real hit fills averaged 0.83 for 0.75;
   the simulation gives 0.825); above Pay at most the bot waits;
 - **time:** the leader when Time left is reached, within Leader at least / Pay at most (else the first later
-  moment it is, until 5 s before the end).
+  moment it is, until 5 s before the end);
+- **move:** the first second the coin itself is Move ($) from the round's start, the way it moved, at the token's
+  price then. Past coin prices come from Binance's 1-second candles (Polymarket's Chainlink feed only reaches back a
+  minute; downloaded once, `data/history/<COIN>-<tf>-coin.json`).
 
 So every bet has the price the bot would really have paid (plus a 1-cent spread), wins only if that round really went
 that way, and the next bet waits until the previous one is paid out (about 3 minutes after its round). Runs stitch
@@ -168,12 +171,13 @@ ladder end / used up the budget, the longest losing streak, the win rate against
 | `recover_wins` | 1 | **Recover over (wins)**, recover sizing: how many wins pay back a losing streak. 1 = one win pays back everything (bets ~2× per loss). 2 = each win pays back half of what is still owed plus the Profit per win (~1.5× per loss), 3 = a third (~1.35×). The rest is carried to the next bets; a loss spreads the debt over N wins again. |
 | `target_steps` | 0 (= off) | Steps to survive: works out the first bet (Profit per win, or Starting bet with multiply) so the budget pays for this many losses in a row even at the Max price. Recalculated at each new streak from the budget left. |
 | `max_steps` | 0 (= budget decides) | End the ladder after this many losses in a row. |
-| `on_ladder_end` | stop | `stop` = halt (press Reset). `reset` = accept the loss and start again at step 1. |
-| `entry_mode` | side | `side` = pick a side by `side_mode` and buy it within Min/Max price in the entry window. `hit` = watch both sides and buy whichever first reaches `hit_price`, any time in the round. `time` = when `time_left_sec` are left, buy the leading (dearer) side. In hit and time mode side mode and Min/Max price are unused. |
+| `on_ladder_end` | stop | `stop` = halt (press Reset, or Reset ▾ → Reset only ladder to keep the profit and counts). `reset` = accept the loss and start again at step 1. |
+| `entry_mode` | side | `side` = pick a side by `side_mode` and buy it within Min/Max price in the entry window. `hit` = watch both sides and buy whichever first reaches `hit_price`, any time in the round. `time` = when `time_left_sec` are left, buy the leading (dearer) side. `move` = when the coin is `move_usd` dollars from the Price To Beat, buy that way. In hit and time mode side mode and Min/Max price are unused. |
+| `move_usd` | 50 | move mode: bet when the coin's live price (Chainlink, what rounds settle on) is this many dollars above the round's Price To Beat (Up) or below it (Down); any time in the round unless `entry_window_sec` is set. |
 | `time_left_sec` | 120 | time mode: bet when this many seconds are left; if the leader's price isn't within the limits then, keep checking until 5 s before the end. |
 | `time_min_price` | 0 (any) | time mode: bet only if the leader costs at least this, e.g. 0.60. |
 | `hit_price` | 0.75 | hit mode: buy the first side whose best ask reaches this. |
-| `hit_max_price` | 0 (no limit) | hit and time mode: never pay more per share, e.g. 0.80; if a side jumped past it, wait for a price back in between. Empty/0 = no limit (up to 0.99). |
+| `hit_max_price` | 0 (no limit) | hit, time and move mode: never pay more per share, e.g. 0.80; if a side jumped past it, wait for a price back in between. Empty/0 = no limit (up to 0.99). |
 | `side_mode` | alternate | `alternate` Up/Down/Up…, `follow_last` = what the last finished round was, `opposite_last` = against it, `cheaper` = the lower-priced side, `up_only`, `down_only`, `flip_on_loss`, `flip_on_win`, `random`. |
 | `first_side` | up | The first side for alternate/flip modes, and the fallback when the last result isn't known. |
 | `min_price` | 0.45 | Never bet on a side cheaper than this (stops long shots). If it is cheaper, the bot waits; after the entry window it skips the round. 0 = no minimum. |
@@ -203,10 +207,10 @@ Headless, without the page:
 On the server the app runs in **hosted mode**: `python -m poly_bot hosted --host 127.0.0.1 --port 8090` (systemd
 unit `poly-bot`), behind Caddy, which adds HTTPS for **https://poly.zodypay.com**.
 
-- **No sign-in needed:** a first visit becomes a guest account tied to that browser (a cookie for a year).
-  **Keep my bots with email** (optional, a 6-digit code sent with Resend) lets a user reach their bots from any
-  browser; a guest who adds an email keeps their bots. Admins sign in with their email. Guests with live bots are
-  warned to add an email first: a live bot keeps trading even if its browser's cookies are lost.
+- **Email sign-in and admin approval required:** the site shows only the sign-in screen until you sign in with
+  your email (a 6-digit code sent with Resend, no password). A new account then waits until an admin
+  (`ADMIN_EMAILS`) approves it: the admins get an email, and **👥 Users** shows "(N waiting)" with ✅ Approve /
+  Reject, and Disable / Enable for approved accounts. There are no guest accounts.
 - **Each user has their own bots** (`hosted/users/<id>/profiles/`), as many as they like (`MAX_BOTS` can set a limit; 0 = none), and sees only those.
 - **Paper bots** work for everyone. **Live bots** use the user's own Polymarket keys, stored **encrypted**
   (`POLY_SECRET_KEY`), and can only be started from a country where Polymarket allows trading. The app checks the

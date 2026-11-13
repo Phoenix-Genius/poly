@@ -155,6 +155,11 @@ The legacy `py-clob-client` is superseded: don't use it.
   `_live_refusal` check on start/check. The owner's bots were adopted into user 1 (onetodaysoft@proton.me, admin).
   Bot log keys are `u<id>/<bot>` so users' bots never share a logger. Not done: session keys (need Polymarket
   Builder approval; would let users give trade-only keys), disabling users from the page (API only), a terms page.
+- **Email sign-in and admin approval required (2026-11-13), reversing the next point:** "lock this site with email
+  login. not allowed guest mode." then "it should be allowed by admin - onetodaysoft@proton.me": new email accounts
+  wait (403 pending) until an admin approves them in Users; admins are emailed on a first sign-in. `/api/me` answers 401 without an email session and the page shows only the sign-in screen (no
+  "continue without email"); old guest cookies count as signed out; no new guests. The 23 guest accounts had no bots
+  and were left in the database.
 - **No sign-in (2026-11-09, same day):** "no need to signin to use this. just make use freely." Guests (cookie
   `poly_session`, 365 days, max 20 new guests per IP per hour) use everything, live included; email sign-in stays
   optional (to keep bots across browsers, and for admins). A guest signing in with an email that already has an
@@ -174,7 +179,7 @@ The legacy `py-clob-client` is superseded: don't use it.
   "right away / after a win" like bcauto; bot list drag + pin like hyperliquid; round volume must be real time
   (Gamma's lags: use the CLOB WebSocket, `volume.py`).
 - **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13) and 1.1.0 ("c and p minor
-  update", same day).
+  update", same day), 1.2.0 ("c can p with minor update", 2026-11-14).
 - **Simulation must be real (2026-11-13):** "plz simulate as real for all modes." Default = replay past rounds
   (`history.py`, `simulate.entry_for`); keep its entry rules in step with the engine's when a mode changes. Hit
   fills are calibrated (`HIT_FILL`) on the paper bots' real fills: re-check against more fills later.

@@ -56,12 +56,12 @@ def entry_span(cfg, length: float) -> tuple[float, float]:
     before the end to 5 s before it; else from the start through the Entry window."""
     if mode(cfg) == "time":
         return max(0.0, length - cfg.time_left_sec), length - 5
-    return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec, mode(cfg) == "hit")
+    return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec, mode(cfg) in ("hit", "move"))
 
 
 def buy_cap(cfg) -> float:
-    """The most the bot pays per share: Max price, or Pay at most in hit and time mode (0 = no limit: 0.99)."""
-    if mode(cfg) in ("hit", "time"):
+    """The most the bot pays per share: Max price, or Pay at most in hit, time and move mode (0 = no limit: 0.99)."""
+    if mode(cfg) in ("hit", "time", "move"):
         return cfg.hit_max_price or 0.99
     return cfg.max_price
 
@@ -73,6 +73,8 @@ def plan_price(cfg) -> float:
         return cfg.hit_max_price or cfg.hit_price
     if mode(cfg) == "time":
         return cfg.hit_max_price or cfg.time_min_price or 0.75
+    if mode(cfg) == "move":
+        return cfg.hit_max_price or 0.75
     return cfg.max_price
 
 

@@ -28,9 +28,9 @@ from .instance import PROFILES_DIR, ROOT, AlreadyRunning, acquire_lock, bot_ids,
 from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
-from .history import MIN_ROUNDS, History
+from .history import MIN_ROUNDS, CoinPaths, History
 from .simulate import simulate
-from .strategy import build_ladder, buy_cap, plan_price, steps_that_fit, streak_sizing
+from .strategy import build_ladder, buy_cap, plan_price, recover_part, steps_that_fit, streak_sizing
 from .trades import append_event, read_events, read_trades
 
 log = logging.getLogger("poly")
@@ -38,6 +38,7 @@ STATIC = Path(__file__).parent / "static"
 FORMAT = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S")
 PM = Polymarket()                     # shared by all bots: one cache of series ids
 HISTORY = History(PM)                 # past rounds for the real simulation, shared too
+COIN_PATHS = CoinPaths()              # the coin's own price inside those rounds (move mode)
 RUNNING_MARK = ".running"             # in a bot's folder while it should be running
 STARTED = str(time.time())            # changes on every app start; an open page reloads its settings form then
 
@@ -115,12 +116,18 @@ class Controller:
             client = PaperClient(cfg.paper_file, cfg.paper_balance_usd, self.pm)
         return Bot(cfg, client, self.pm, self.log)
 
-    def balance(self) -> Optional[float]:
-        """The account balance, or None when it can't be read (live without keys, network down)."""
+    def wallet(self) -> Optional[float]:
+        """The whole account's balance, or None when it can't be read (live without keys, network down)."""
         try:
             return self.bot.client.balance()
         except Exception:  # noqa: BLE001 - the page shows "–" and the Keys panel says why
             return None
+
+    def balance(self) -> Optional[float]:
+        """The bot's own balance: Budget + profit since Reset - the open bet when a Budget is set (each bot plays
+        with its budget), else the account's. None when the account can't be read."""
+        w = self.wallet()
+        return None if w is None else self.bot.own_balance(w)
 
     @property
     def cfg(self) -> BotConfig:
@@ -193,6 +200,17 @@ class Controller:
         before = f"was step {lad.step}, profit since Reset {'+' if lad.pnl >= 0 else '-'}${abs(lad.pnl):,.2f}"
         self.bot.reset()
         append_event(self.folder, "reset", f"Reset: fresh ladder at step 1, profit counted from 0 ({before})")
+        return self.status()
+
+    def reset_ladder(self) -> dict:
+        """Back to step 1 only: Profit since Reset and the win/loss counts stay (the streak's loss is accepted)."""
+        self._check_owned()
+        if self.running:
+            raise ValueError("Stop the bot first, then Reset.")
+        lad = self.bot.ladder
+        before = f"was step {lad.step}" + (f", streak lost ${lad.streak_lost:,.2f}" if lad.streak_lost else "")
+        self.bot.reset(keep_counts=True)
+        append_event(self.folder, "reset", f"Reset only ladder: back to step 1, profit and wins/losses kept ({before})")
         return self.status()
 
     def paper_reset(self) -> dict:
@@ -289,6 +307,15 @@ class Controller:
                 if progress and progress.get("error") and not (progress["total"] or progress["done"]):
                     raise ValueError(f"Couldn't load past rounds from Polymarket: {progress['error']}")
                 return {"loading": progress or {"done": 0, "total": 0}, "have": len(rounds)}
+            if cfg.move_mode:                                 # needs the coin's own price inside each round
+                paths, coin_progress = COIN_PATHS.paths(cfg.coin, cfg.timeframe, rounds)
+                with_path = [{**r, "coin": paths[r["slug"]]} for r in rounds if r["slug"] in paths]
+                if coin_progress or len(with_path) < MIN_ROUNDS:
+                    if not coin_progress and len(with_path) < MIN_ROUNDS:
+                        raise ValueError(f"Couldn't load {cfg.coin}'s past prices (Binance {cfg.coin}USDT) for "
+                                         f"the move mode.")
+                    return {"loading": {**coin_progress, "what": f"{cfg.coin} prices"}, "have": len(with_path)}
+                rounds = with_path
             chance = None
         out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, chance, rounds=rounds)
         out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
@@ -302,8 +329,24 @@ class Controller:
         lost, wins_left = (0.0, 0) if fresh else (lad.streak_lost, lad.wins_left)
         budget = self._budget(cfg) + lad.streak_lost
         sizing, base = streak_sizing(cfg, step, base, budget - lost, lost > 0)
-        view = ladder_view(sizing or cfg, price, budget, step, lost,
-                           streak_bets(read_trades(self.cfg.trade_log), step) if step > 1 else None, wins_left)
+        played = streak_bets(read_trades(self.cfg.trade_log), step) if step > 1 else None
+        bet = None if fresh else self.bot.bet
+        if bet and bet.get("step") == step:
+            # the open bet as it was really placed; the steps after it priced at its real price (or the settings'
+            # price when that is dearer), so the table agrees with Current bet
+            price = max(price, float(bet["price"]))
+            view = ladder_view(sizing or cfg, price, budget, step + 1, lost + bet["cost"], played, 0)
+            part = recover_part(cfg, lost, wins_left) if cfg.sizing == "recover" else lost
+            row = {"step": step, "shares": bet["shares"], "cost": round(bet["cost"], 2),
+                   "win_profit": round(bet["shares"] - bet["cost"] - part, 2),
+                   "lost_total": round(lost + bet["cost"], 2), "fits": True, "open": True,
+                   "price": float(bet["price"]), "side": bet["side"], "left_after_win": round(lost - part, 2)}
+            n_played = len(played or [])
+            view["rows"] = view["rows"][:n_played] + [row] + view["rows"][n_played:]
+            view.update(step=step, lost=round(lost, 2), left=round(budget - lost, 2), fits=view["fits"] + 1,
+                        open_price=float(bet["price"]))
+        else:
+            view = ladder_view(sizing or cfg, price, budget, step, lost, played, wins_left)
         view["recover_wins"] = cfg.recover_wins if cfg.sizing == "recover" else 1
         view["wins_left"] = (wins_left or view["recover_wins"]) if lost > 0 else 0
         view["auto"] = None if not cfg.target_steps else {
@@ -312,7 +355,7 @@ class Controller:
         return view
 
     def _budget(self, cfg: BotConfig) -> float:
-        bal = (self.balance() or 0.0) + (self.bot.bet["cost"] if self.bot.bet else 0.0)
+        bal = (self.wallet() or 0.0) + (self.bot.bet["cost"] if self.bot.bet else 0.0)
         if cfg.budget_usd > 0:
             return max(0.0, min(bal, cfg.budget_usd + self.bot.ladder.pnl))
         return bal
@@ -326,7 +369,8 @@ class Controller:
                "halted": "" if b.halted == "after_win" else b.halted,     # a stop you asked for isn't a halt
                "stop_after_win": b.stop_after_win and self.running, "step": b.ladder.step,
                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
-               "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses}
+               "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
+               "budget": self.cfg.budget_usd > 0}
         if full:
             phase, message = self._phase()
             bal = self.balance()
@@ -358,6 +402,8 @@ class Controller:
                                               "start", "end", "url")}
             bet["mid"] = b.live.get("mid")
             bet["volume"] = b.live.get("volume")
+            bet["price_to_beat"] = b.bet.get("price_to_beat")
+            bet["coin_price"] = b.live.get("coin_price")
             bet["ends_in"] = max(0, b.bet["end"] - now)
             bet["win_profit"] = round(b.bet["shares"] - b.bet["cost"], 2)
         phase, message = self._phase()
@@ -368,6 +414,7 @@ class Controller:
             "phase": phase, "message": message, "halt_message": b.halt_message,
             "settings": self.cfg.settings(),
             "balance": None if (bal := self.balance()) is None else round(bal, 2),
+            "wallet": None if (w := self.wallet()) is None else round(w, 2),
             "keys": keys_view(read_keys(self.folder)), "live_check": self.last_check,
             "unclaimed": round(b.client.unclaimed(), 2) if hasattr(b.client, "unclaimed") else 0.0,
             "start_balance": round(float(b.client.data.get("start_balance", 0)), 2),
@@ -583,6 +630,7 @@ ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and
 
 BOT_PATH = re.compile(r"^/api/bots/([A-Za-z0-9_-]{1,30})/([a-z_]+)$")
 BOT_POST = {"start": Controller.start, "stop": Controller.stop, "reset": Controller.reset,
+            "reset_ladder": Controller.reset_ladder,
             "paper_reset": Controller.paper_reset, "check": Controller.check,
             "stop_after_win": Controller.stop_after_win, "cancel_after_win": Controller.cancel_after_win}
 BOT_POST_BODY = {"settings": Controller.put_settings, "plan": Controller.plan, "keys": Controller.put_keys,

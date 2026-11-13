@@ -7,7 +7,7 @@ from pathlib import Path
 from poly_bot.config import BotConfig
 from poly_bot.engine import Bot
 from poly_bot.paper import PaperClient
-from poly_bot.trades import read_trades
+from poly_bot.trades import read_events, read_trades
 from tests.fakes import Clock, FakePM
 
 
@@ -160,6 +160,47 @@ class EngineTest(unittest.TestCase):
         self.assertIsNone(bot.bet)
         self.assertIn("Too late", bot.message)
 
+    def move_feed(self, now: float, beat: float):
+        class Feed:
+            available = True
+
+            def watch(self, coin):
+                pass
+
+            def price(self, coin):
+                return self.now
+
+            def price_to_beat(self, coin, r, tf):
+                return self.beat
+        feed = Feed()
+        feed.now, feed.beat = now, beat
+        self.pm.coin_prices = feed
+        return feed
+
+    def test_move_mode_bets_the_way_the_coin_moved(self):
+        feed = self.move_feed(71500.0, 71540.08)     # $40.08 below: not yet
+        bot = self.make(entry_mode="move", move_usd=50)
+        self.clock.t += 30
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("$40.08 below the Price To Beat $71,540.08", bot.message)
+        feed.now = 71489.0                           # $51.08 below: bet Down (side_mode up_only is ignored)
+        bot.tick()
+        self.assertEqual(bot.bet["side"], "down")
+        self.assertAlmostEqual(bot.bet["price_to_beat"], 71540.08)
+
+    def test_move_mode_respects_pay_at_most(self):
+        self.move_feed(71700.0, 71540.0)             # $160 above: Up
+        self.pm.prices["up"] = 0.85
+        bot = self.make(entry_mode="move", move_usd=50, hit_max_price=0.8)
+        self.clock.t += 30
+        bot.tick()
+        self.assertIsNone(bot.bet)
+        self.assertIn("above Pay at most 0.80", bot.message)
+        self.pm.prices["up"] = 0.78
+        bot.tick()
+        self.assertEqual(bot.bet["side"], "up")
+
     def test_price_below_min_waits(self):
         self.pm.prices["up"] = 0.2
         bot = self.make(min_price=0.3)
@@ -217,6 +258,9 @@ class EngineTest(unittest.TestCase):
         self.assertIsNone(bot.bet)
         with self.assertRaises(ValueError):
             bot.on_start()
+        ev = read_events(bot.cfg.folder)
+        self.assertEqual([e["kind"] for e in ev], ["ladder_end"])          # logged in History once
+        self.assertIn("The bot stopped", ev[0]["text"])
         bot.reset()
         bot.on_start()
         self.assertEqual(bot.ladder.step, 1)
@@ -245,6 +289,9 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(bot.ladder.step, 1)
         self.assertFalse(bot.halted)
         self.assertLess(bot.ladder.pnl, 0)
+        ev = read_events(bot.cfg.folder)
+        self.assertEqual([e["kind"] for e in ev], ["ladder_end"])
+        self.assertIn("Reset by itself", ev[0]["text"])
 
     def test_until_earn_stops(self):
         bot = self.make(stop_profit_usd=4)

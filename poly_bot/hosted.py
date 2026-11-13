@@ -2,10 +2,11 @@
 
     python -m poly_bot hosted --port 8090            (behind Caddy, which adds HTTPS: poly.zodypay.com)
 
-No sign-in is needed (owner's choice, 2026-11-09: "no need to signin to use this. just make use freely"): a first
-visit becomes a **guest** account tied to that browser (a long-lived cookie). Signing in with an email (a 6-digit
-code, no passwords) is optional: it lets a user reach their bots from another browser, and admins need it. A guest
-who signs in keeps their bots (moved into the email's account if it already exists). Each user has their own bots in
+**Email sign-in is required, and the admin approves each account** (owner's choice, 2026-11-13: "lock this site
+with email login. not allowed guest mode." / "it should be allowed by admin"): a 6-digit code sent to the email, no
+passwords. A new email's account waits until an admin (ADMIN_EMAILS) approves it in the Users list; the admins get an
+email when someone asks. Guest accounts (2026-11-09 to 11-13, no email) can't be used any more: their cookie counts as
+signed out. Each user has their own bots in
 hosted/users/<id>/profiles/ and sees only those. Paper bots work for everyone. Live bots use the user's own Polymarket
 keys (stored encrypted with POLY_SECRET_KEY) and may only be started from a country where Polymarket allows trading
 (geo.py checks the user's address, not the server's). Bots that were running when the app stopped start again with it.
@@ -100,10 +101,14 @@ class Store:
                     INSERT INTO users SELECT id, email, created, last_login, disabled, country FROM users_old;
                     DROP TABLE users_old;
                 """)
+            if cols and "approved" not in cols:   # admin approval (2026-11-13): accounts that existed are approved
+                self.db.execute("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("UPDATE users SET approved=1 WHERE email IS NOT NULL")
             self.db.executescript("""
                 CREATE TABLE IF NOT EXISTS guests (ip TEXT NOT NULL, created REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT UNIQUE,
-                    created REAL NOT NULL, last_login REAL, disabled INTEGER NOT NULL DEFAULT 0, country TEXT);
+                    created REAL NOT NULL, last_login REAL, disabled INTEGER NOT NULL DEFAULT 0, country TEXT,
+                    approved INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS codes (email TEXT PRIMARY KEY, hash TEXT NOT NULL, expires REAL NOT NULL,
                     tries INTEGER NOT NULL DEFAULT 0, sent REAL NOT NULL, hour_start REAL NOT NULL,
                     hour_sends INTEGER NOT NULL);
@@ -222,6 +227,10 @@ class Store:
         with self.lock:
             return [dict(r) for r in self.db.execute("SELECT * FROM users ORDER BY id")]
 
+    def set_approved(self, user_id: int) -> None:
+        with self.lock, self.db:
+            self.db.execute("UPDATE users SET approved=1, disabled=0 WHERE id=?", (user_id,))
+
     def set_disabled(self, user_id: int, disabled: bool) -> None:
         with self.lock, self.db:
             self.db.execute("UPDATE users SET disabled=? WHERE id=?", (int(disabled), user_id))
@@ -259,6 +268,28 @@ def send_code_email(to: str, code: str) -> None:
         raise ValueError("Couldn't send the email. Try again later.") from None
 
 
+def send_approval_request(to: list, email: str) -> None:
+    """Tell the admins someone signed in and waits for approval (best effort: a failure is only logged)."""
+    key = os.environ.get("RESEND_API_KEY", "")
+    hosts = env_list("PUBLIC_HOSTS")
+    site = f"https://{hosts[0]}" if hosts else "the app"
+    if not key or not to:
+        log.warning("New account %s waits for approval (no admin email sent)", email)
+        return
+    sender = os.environ.get("MAIL_FROM", "Poly Martingale <bot@zodypay.com>")
+    text = f"{email} signed in to Poly Martingale and waits for your approval.\n\nApprove or disable it in 👥 Users at {site}"
+    req = urllib.request.Request(
+        "https://api.resend.com/emails", method="POST",
+        data=json.dumps({"from": sender, "to": to, "subject": f"Approve {email}?", "text": text}).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                 "User-Agent": "poly-martingale-bot"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
+    except (urllib.error.HTTPError, OSError) as e:
+        log.error("Couldn't email the admins about %s: %s", email, e)
+
+
 # ---------- the users' bots ---------------------------------------------------------------------------------------
 
 class UserApp(App):
@@ -292,11 +323,18 @@ class Hosted:
     def is_admin(self, user: Optional[dict]) -> bool:
         return bool(user and user.get("email")) and user["email"].lower() in env_list("ADMIN_EMAILS")
 
+    def is_approved(self, user: Optional[dict]) -> bool:
+        return bool(user and user.get("email")) and (bool(user.get("approved")) or self.is_admin(user))
+
     def sign_in(self, guest: Optional[dict], email: str, code: str) -> dict:
         """Check the code. A guest's account becomes this email's, or (email already has an account) the guest's
         bots move into that account and the guest is removed. Returns the signed-in user."""
         is_guest = bool(guest) and not guest.get("email")
         user = self.store.check_code(email, code, guest_id=guest["id"] if is_guest else None)
+        if not self.is_approved(user) and user.get("created") == user.get("last_login"):   # first sign-in
+            threading.Thread(target=send_approval_request, args=(env_list("ADMIN_EMAILS"), user["email"]),
+                             daemon=True).start()
+            log.info("New account %s (%s) waits for approval", user["id"], user["email"])
         if is_guest:
             if user["id"] == guest["id"]:
                 app = self.apps.get(user["id"])
@@ -348,11 +386,22 @@ class Hosted:
         for u in self.store.users():
             app = self.apps.get(u["id"])
             bots = list(app.controllers.values()) if app else []
+            if not u["email"]:
+                continue                                  # old guest accounts: unusable, not listed
             out.append({"id": u["id"], "email": u["email"] or "", "created": u["created"], "last_login": u["last_login"],
-                        "country": u.get("country") or "", "disabled": bool(u["disabled"]), "bots": len(bots),
+                        "country": u.get("country") or "", "disabled": bool(u["disabled"]),
+                        "approved": self.is_approved(u), "admin": self.is_admin(u), "bots": len(bots),
                         "running": sum(c.running for c in bots),
                         "live_running": sum(c.running and c.cfg.is_live for c in bots)})
         return {"users": out}
+
+    def admin_approve(self, user_id: int) -> dict:
+        self.store.set_approved(user_id)
+        u = self.store.user(user_id)
+        if u:
+            self.app_for(u)
+        log.info("User %s approved", user_id)
+        return self.admin_users()
 
     def admin_disable(self, user_id: int, disabled: bool) -> dict:
         app = self.apps.get(user_id)
@@ -393,7 +442,7 @@ def make_hosted_handler(h: Hosted):
     base = make_handler(None)
     hosts = set(env_list("PUBLIC_HOSTS")) | {"127.0.0.1", "localhost"}
     secure = os.environ.get("COOKIE_INSECURE") != "1"       # tests on plain http://localhost set COOKIE_INSECURE=1
-    admin_path = re.compile(r"^/api/admin/users/(\d+)/(disable|enable)$")
+    admin_path = re.compile(r"^/api/admin/users/(\d+)/(disable|enable|approve)$")
 
     class Handler(base):
         def setup(self):
@@ -407,7 +456,9 @@ def make_hosted_handler(h: Hosted):
         @property
         def user(self) -> Optional[dict]:
             if not hasattr(self, "_user"):
-                self._user = h.store.user_for(self._token())
+                u = h.store.user_for(self._token())
+                self._pending = u if u and u.get("email") and not h.is_approved(u) else None
+                self._user = u if h.is_approved(u) else None     # a guest (no email) or an unapproved account: out
             return self._user
 
         def _app(self):
@@ -470,13 +521,11 @@ def make_hosted_handler(h: Hosted):
         def do_GET(self):
             if self._host_ok() and self.path.split("?")[0] == "/api/me":
                 u = self.user
-                if not u:                     # a first visit: a guest account, no email needed
-                    try:
-                        u = self._user = h.store.new_guest(self._ip())
-                    except ValueError as e:
-                        return self._json(429, {"error": str(e)})
-                    self._cookie(h.store.new_session(u["id"], days=GUEST_DAYS), GUEST_DAYS * 86400)
-                    log.info("New guest %s", u["id"])
+                if not u and self._pending:   # signed in, but the admin hasn't approved the account yet
+                    return self._json(403, {"error": "Waiting for the admin's approval.", "pending": True,
+                                            "email": self._pending["email"]})
+                if not u:                     # not signed in: the page shows the sign-in screen
+                    return self._json(401, {"error": "Sign in with your email.", "signin": True})
                 ok, why = self._live_check()
                 return self._json(200, {"email": u["email"] or "", "guest": not u["email"], "admin": h.is_admin(u),
                                         "live_allowed": ok,
@@ -496,6 +545,8 @@ def make_hosted_handler(h: Hosted):
             if m:
                 if not h.is_admin(self.user):
                     return self._json(403, {"error": "forbidden"})
+                if m.group(2) == "approve":
+                    return self._call(h.admin_approve, int(m.group(1)))
                 return self._call(h.admin_disable, int(m.group(1)), m.group(2) == "disable")
             return super().do_POST()
 
@@ -544,7 +595,7 @@ def serve_hosted(host: str, port: int, adopt_email: str = "") -> None:
             log.info("Moved %d bot(s) from profiles/ into %s's account", moved, adopt_email)
     threading.Thread(target=lambda: geo.DB.country("1.1.1.1"), daemon=True).start()   # load the country database
     for u in h.store.users():
-        if not u["disabled"]:
+        if not u["disabled"] and h.is_approved(u):   # guests and accounts waiting for approval: no bots to run
             h.app_for(u)
     h.resume_all()
     server = bind_server(host, port, make_hosted_handler(h), tries=1)

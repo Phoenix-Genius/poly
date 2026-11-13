@@ -121,3 +121,98 @@ class History:
         except Exception as e:  # noqa: BLE001 - shown on the page; the next request tries again
             job["error"] = str(e)
             log.warning("Price history %s %s failed: %s", coin, tf, e)
+
+
+# --- the coin's own price inside each past round, for simulating the move mode -----------------------------------
+# Polymarket's live feed only reaches back a minute, so past paths come from Binance's <COIN>USDT candles (Chainlink,
+# which the rounds settle on, follows the big exchanges closely; the level can differ by a few dollars, the moves
+# hardly). 1-second candles for 5m and 15m rounds, 1-minute ones for longer. Per round: "o" = the price at its start,
+# "k" = [[seconds in, highest - o so far, lowest - o so far], ...] at each second that set a new high or low. Kept in data/history/<COIN>-<tf>-coin.json.
+BINANCE = "https://api.binance.com/api/v3/klines"
+
+
+class CoinPaths:
+    def __init__(self, folder: Path = HISTORY_DIR):
+        self.folder = folder
+        self._lock = threading.Lock()
+        self._jobs: dict[tuple, dict] = {}
+        self._cache: dict[tuple, dict] = {}
+
+    def path(self, coin: str, tf: str) -> Path:
+        return self.folder / f"{coin.upper()}-{tf}-coin.json"
+
+    def paths(self, coin: str, tf: str, rounds: list) -> tuple[dict, Optional[dict]]:
+        """({round slug: {"o", "k"}} for the rounds cached so far, progress of a load still running or None)."""
+        key = (coin.upper(), tf)
+        with self._lock:
+            if key not in self._cache:
+                try:
+                    self._cache[key] = json.loads(self.path(*key).read_text())["paths"]
+                except (OSError, ValueError, KeyError):
+                    self._cache[key] = {}
+            have = self._cache[key]
+            missing = [r for r in rounds if r["slug"] not in have]
+            job = self._jobs.get(key)
+            running = job and job["thread"].is_alive()
+            if missing and not running and not (job and job.get("failed_for") == len(missing)):
+                job = {"done": 0, "total": len(missing), "error": ""}
+                job["thread"] = threading.Thread(target=self._load, args=(key, job, missing), daemon=True,
+                                                 name=f"coinpaths-{coin}-{tf}")
+                self._jobs[key] = job
+                job["thread"].start()
+                running = True
+        progress = {k: job[k] for k in ("done", "total", "error")} if running else None
+        return have, progress
+
+    def _load(self, key: tuple, job: dict, rounds: list) -> None:
+        coin, tf = key
+        sec = ROUND_SECONDS[tf] <= 900
+        step = 1 if sec else 60
+        got: dict = {}
+        # one request covers 1000 candles: walk the rounds in time order, fetching each stretch once
+        rounds = sorted(rounds, key=lambda r: r["start"])
+        chunks, cur = [], None
+        for r in rounds:
+            if cur and r["end"] <= cur[0] + 1000 * step:
+                cur[1].append(r)
+            else:
+                cur = [int(r["start"]), [r]]
+                chunks.append(cur)
+
+        def fetch(chunk):
+            start, rs = chunk
+            try:
+                k = get_json(BINANCE, {"symbol": f"{coin.upper()}USDT", "interval": "1s" if sec else "1m",
+                                       "startTime": start * 1000, "limit": 1000})
+            except MarketError as e:
+                job["error"] = str(e)
+                k = []
+            candles = [(int(c[0]) // 1000, float(c[1]), float(c[2]), float(c[3])) for c in k]
+            out = {}
+            for r in rs:
+                inside = [c for c in candles if r["start"] <= c[0] < r["end"]]
+                if not inside:
+                    continue
+                o, hi, lo, k = inside[0][1], 0.0, 0.0, []
+                for c in inside:          # only the candles that set a new high or low: a move of any size is
+                    if c[2] - o > hi or c[3] - o < lo:       # first reached at one of them
+                        hi, lo = max(hi, c[2] - o), min(lo, c[3] - o)
+                        k.append([c[0] - int(r["start"]), round(hi, 4), round(lo, 4)])
+                out[r["slug"]] = {"o": o, "k": k}
+            job["done"] += len(rs)
+            return out
+
+        with ThreadPoolExecutor(4) as ex:
+            for part in ex.map(fetch, chunks):
+                got.update(part)
+        with self._lock:
+            merged = {**self._cache.get(key, {}), **got}
+            keep = {r["slug"] for r in rounds} | set(self._cache.get(key, {}))
+            self._cache[key] = {s: v for s, v in merged.items() if s in keep}
+            if not got:
+                job["failed_for"] = len(rounds)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        tmp = self.path(coin, tf).with_suffix(".tmp")                   # compact: it's big
+        tmp.write_text(json.dumps({"coin": coin, "timeframe": tf, "paths": self._cache[key]}, separators=(",", ":")))
+        tmp.replace(self.path(coin, tf))
+        log.info("Coin paths %s %s: %d rounds (%d new)", coin, tf, len(self._cache[key]), len(got))

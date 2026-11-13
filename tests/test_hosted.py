@@ -101,43 +101,58 @@ class HostedHttpTest(unittest.TestCase):
                 return e.code, json.loads(e.read() or b"{}")
         return call
 
-    def sign_in(self, call, email):
+    def sign_in(self, call, email, approve=True):
+        """Sign in with the emailed code; approve=True also approves the account as the admin would."""
         self.assertEqual(call("/api/auth/code", {"email": email})[0], 200)
         status, body = call("/api/auth/verify", {"email": email, "code": self.codes[email]})
         self.assertEqual(status, 200, body)
+        if approve:
+            self.h.store.set_approved(self.h.store.user_by_email(email)["id"])
 
-    def test_guests_use_it_without_signing_in(self):
-        guest = self.client()
-        self.assertEqual(guest("/api/bots")[0], 401)              # no cookie yet: the page asks /api/me first
-        me = guest("/api/me")[1]
-        self.assertTrue(me["guest"])
-        self.assertEqual(me["email"], "")
-        self.assertEqual(guest("/api/bots", {"coin": "BTC", "timeframe": "5m"})[1]["id"], "btc-5m")
-        self.assertEqual(guest("/api/bots/btc-5m/start", {})[0], 200)
-        self.assertEqual(guest("/api/me")[1]["guest"], True)       # same guest on the next visit
-        self.sign_in(guest, "new@x.com")                            # adding an email keeps the bots
-        me = guest("/api/me")[1]
+    def test_email_sign_in_is_required(self):
+        visitor = self.client()
+        status, body = visitor("/api/me")
+        self.assertEqual((status, body.get("signin")), (401, True))            # no guest account any more
+        self.assertEqual(visitor("/api/bots")[0], 401)
+        self.assertEqual(visitor("/api/bots", {"coin": "BTC", "timeframe": "5m"})[0], 401)
+        self.sign_in(visitor, "new@x.com")
+        me = visitor("/api/me")[1]
         self.assertEqual((me["guest"], me["email"]), (False, "new@x.com"))
-        self.assertEqual([b["id"] for b in guest("/api/bots")[1]["bots"]], ["btc-5m"])
+        self.assertEqual(visitor("/api/bots", {"coin": "BTC", "timeframe": "5m"})[1]["id"], "btc-5m")
 
-    def test_guest_bots_move_into_existing_account(self):
-        old = self.client()
-        old("/api/me")
-        self.sign_in(old, "owner@x.com")
-        old("/api/bots", {"coin": "BTC", "timeframe": "5m"})
-        other_browser = self.client()
-        other_browser("/api/me")
-        other_browser("/api/bots", {"coin": "BTC", "timeframe": "5m"})
-        other_browser("/api/bots/btc-5m/start", {})
-        self.sign_in(other_browser, "owner@x.com")
-        bots = other_browser("/api/bots")[1]["bots"]
-        self.assertEqual(sorted(b["id"] for b in bots), ["btc-5m", "btc-5m-2"])
-        self.assertTrue(next(b for b in bots if b["id"] == "btc-5m-2")["running"])   # kept running
+    def test_new_accounts_wait_for_the_admin(self):
+        with mock.patch.object(hosted, "send_approval_request") as notify:
+            joe = self.client()
+            self.sign_in(joe, "joe@x.com", approve=False)
+        notify.assert_called_once_with(["boss@x.com"], "joe@x.com")      # the admins are told
+        status, body = joe("/api/me")
+        self.assertEqual((status, body.get("pending"), body.get("email")), (403, True, "joe@x.com"))
+        self.assertEqual(joe("/api/bots")[0], 401)                        # nothing works until approved
+        boss = self.client()
+        self.sign_in(boss, "boss@x.com", approve=False)                   # admins never wait
+        self.assertEqual(boss("/api/me")[0], 200)
+        users = boss("/api/admin/users")[1]["users"]
+        jid = next(u for u in users if u["email"] == "joe@x.com")["id"]
+        self.assertFalse(next(u for u in users if u["id"] == jid)["approved"])
+        self.assertEqual(joe(f"/api/admin/users/{jid}/approve", {})[0], 403)   # not by themselves
+        users = boss(f"/api/admin/users/{jid}/approve", {})[1]["users"]
+        self.assertTrue(next(u for u in users if u["id"] == jid)["approved"])
+        self.assertEqual(joe("/api/me")[1]["email"], "joe@x.com")        # in now, same session
+        self.assertEqual(joe("/api/bots", {"coin": "BTC", "timeframe": "5m"})[0], 200)
+        with mock.patch.object(hosted, "send_approval_request") as notify:
+            self.sign_in(joe, "joe@x.com", approve=False)                  # signing in again: no new request
+        notify.assert_not_called()
+
+    def test_an_old_guest_cookie_is_signed_out(self):
+        guest = self.h.store.new_guest("1.2.3.4")              # made before guests were turned off
+        token = self.h.store.new_session(guest["id"])
+        req = urllib.request.Request(self.base + "/api/me", headers={"Cookie": f"{hosted.COOKIE}={token}"})
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        self.assertEqual(e.exception.code, 401)
 
     def test_sign_in_and_users_are_separate(self):
         alice, bob = self.client(), self.client()
-        alice("/api/me")
-        bob("/api/me")
         self.sign_in(alice, "alice@x.com")
         self.sign_in(bob, "bob@x.com")
         self.assertEqual(alice("/api/bots", {"coin": "BTC", "timeframe": "5m"})[1]["id"], "btc-5m")
@@ -149,12 +164,11 @@ class HostedHttpTest(unittest.TestCase):
         self.assertEqual(alice("/api/admin/users")[0], 403)
         alice("/api/auth/logout", {})
         self.assertEqual(alice("/api/bots")[0], 401)
-        self.assertTrue(alice("/api/me")[1]["guest"])           # back as a new guest with no bots
-        self.assertEqual(alice("/api/bots")[1]["bots"], [])
+        self.assertEqual(alice("/api/me")[0], 401)               # signed out: the sign-in screen again
 
     def test_live_start_checks_the_users_country(self):
         us = self.client(ip="3.1.2.3")
-        us("/api/me")
+        self.sign_in(us, "us@x.com")
         us("/api/bots", {"coin": "BTC", "timeframe": "5m"})
         self.assertEqual(us("/api/bots/btc-5m/settings", {"network": "live", "budget_usd": 20})[0], 200)
         status, body = us("/api/bots/btc-5m/start", {})
@@ -166,11 +180,10 @@ class HostedHttpTest(unittest.TestCase):
 
     def test_admin_sees_users(self):
         boss = self.client()
-        boss("/api/me")
         self.sign_in(boss, "boss@x.com")
         status, body = boss("/api/admin/users")
         self.assertEqual(status, 200)
-        self.assertEqual([u["email"] for u in body["users"]], ["boss@x.com"])     # the guest became boss
+        self.assertEqual([u["email"] for u in body["users"]], ["boss@x.com"])
 
     def test_post_needs_header_and_host(self):
         req = urllib.request.Request(self.base + "/api/auth/code", data=b'{"email":"a@b.com"}', method="POST")
