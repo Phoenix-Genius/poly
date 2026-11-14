@@ -4,6 +4,72 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-14
+
+### Recover over (wins) shows a recommended value
+- **What:** the setting's label has a *, and under the box "* Recommended: 1–2" (when Pay at most is set at 0.85 or
+  less, hit/time/move mode) or "3 or more" (otherwise), with a ✓ when the value is in range and the reason on hover.
+- **Why:** the owner: "set * to recover over setting" (as a recommendation), after the real-history tests.
+- **How:** `RECOMMEND` / `showRecs` in index.html.
+- **Tests:** none (page only).
+
+### Budget balance counts the open bet at its price now
+- **What:** a Budget bot's balance is Budget + profit since Reset + what the open bet is worth now (its shares at
+  the side's price, checked every 5 s) - what it cost, so it moves with the price while a bet runs. The Account
+  portfolio never shows less than this bot's own open bet (Polymarket's value can lag a fresh bet).
+- **Why:** the owner: "budget balance should show included current betting balance ... it changes in real-time".
+- **How:** `Bot.bet_value()`, `Bot.own_balance()`, `Controller.portfolio()`.
+- **Tests:** test_web `test_budget_bot_shows_its_own_balance` moves the price.
+
+### Account tile shows the portfolio, not just cash
+- **What:** the 🏦 tile is now "Account portfolio", like Polymarket's Portfolio: cash plus what every open bet on the
+  account (every bot's) and unclaimed wins are worth now, with "cash $X · in bets $Y" under it. Paper bots show their
+  paper cash plus this bot's open bet at its price now.
+- **Why:** the owner: "account balance card show portfolio balance, not cash balance."
+- **How:** `LiveClient.portfolio()` reads Polymarket's data API `/v2/value` for the wallet (cached 15 s);
+  `Controller.portfolio()`; status `portfolio`.
+- **Tests:** none new (network); checked the endpoint answers for the live wallet.
+
+### Simulation's table looks like History
+- **What:** run 1's table has History's columns and look: newest first; # in green (win) / red (loss); Paid out
+  (JST); Round (short, linked to Polymarket); Bet; Step; Best (the replay's price); Price (with the price gap);
+  Shares; Cost; Slippage (the price gap); Fee; Costs; Result; Payout; Net; Total; Balance. Ladder ends are red rows
+  like History's.
+- **Why:** the owner: "simulation table should be same as history table in all aspects. such as green and red
+  number."
+- **How:** `RealFeed` adds the round's slug, end, paid-out time and pre-gap price to each bet; `simLogHtml`.
+- **Tests:** existing simulate tests (the page layout isn't unit tested).
+
+### Settings order; "When the ladder ends" defaults to reset
+- **What:** the settings panels are now Market & money, Mode & side, Bet size, Loss recovery, Entry. A new bot's
+  When the ladder ends is **reset** (accept the loss, back to step 1) instead of stop; existing bots keep theirs.
+- **Why:** the owner: "setting parts order - market, mode, bet size, loss... plz. "When the ladder ends" default
+  value is reset."
+- **How:** `GROUPS` in index.html; `FIELDS["on_ladder_end"]` default.
+- **Tests:** test_engine `test_budget_ends_ladder` sets stop itself.
+
+### History: show every bet, and download it as CSV
+- **What:** History still shows the newest 100 bets by default (the page refreshes every 2 s); a **Show all N**
+  button loads every bet (and every log row), and **⬇ Download CSV** saves every bet with all the trade log's
+  columns (placed time, held seconds, best price, slippage...) for a spreadsheet.
+- **Why:** the owner: "why don't keep all history log? plz keep all so that i can analyize that."
+- **How:** `Controller.history()`, `GET /api/bots/<id>/history`; the page builds the CSV itself.
+- **Tests:** test_web `test_history_has_every_bet`.
+
+### Simulation: real past rounds only, at the prices the bots really pay
+- **What:** Fair coin (and its Win chance) is gone: the simulation always replays the real past rounds. Every
+  bet's price is now raised by the **price gap**: how much more your own bots really paid than the replay says,
+  measured on the same rounds (your bots' paper and live bets in the same coin, timeframe and Bet mode, placed
+  within 90 s of where the replay buys). Until 30 such bets exist it uses a default per mode. The summary says
+  which gap was used and on how many bets.
+- **Why:** the owner: "i want everything with this have to be based on real history and reality" (Fair coin said
+  38% of runs end in profit, the replay 99%). Checked on the same rounds the bots really bet: the replay paid
+  4-5 cents less than the bots in hit and time mode and 13.7 cents less in move mode (side mode matched), because
+  1-minute prices can't show how fast they jump. With the gap the hit mode bot's settings go from 99% of runs in
+  profit to about 61%, and move mode from 97% to about 16%.
+- **How:** `simulate.price_gap()`, `with_gap()`, `DEFAULT_GAP`; `Controller._own_bets()`, `web.placed_in_round()`.
+- **Tests:** test_web `test_simulate_adds_the_price_gap_measured_on_own_bets`.
+
 ## [1.2.0] - 2026-11-14
 
 ### History: a log row comes after the bet that caused it

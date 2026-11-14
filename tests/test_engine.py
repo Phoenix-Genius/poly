@@ -249,7 +249,7 @@ class EngineTest(unittest.TestCase):
         self.assertGreater(again.ladder.pnl, 0)
 
     def test_budget_ends_ladder(self):
-        bot = self.make(budget_usd=10)     # 2.69 + 5.56 fit, the 11.53 step 3 doesn't
+        bot = self.make(budget_usd=10, on_ladder_end="stop")    # 2.69 + 5.56 fit, the 11.53 step 3 doesn't
         self.play(bot, "down")
         self.play(bot, "down")
         self.clock.t += 5

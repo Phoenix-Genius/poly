@@ -44,9 +44,28 @@ class AppTest(unittest.TestCase):
         ctl.bot.ladder.pnl = 12.5
         ctl.bot.bet = {"slug": "x", "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8, "cost": 8.1,
                        "fee": 0.1, "start": 1.8e9, "end": 1.8e9 + 300, "url": "u", "token": "x"}
-        self.assertAlmostEqual(ctl.status()["balance"], 200 + 12.5 - 8.1, places=2)
+        self.assertAlmostEqual(ctl.status()["balance"], 200 + 12.5 + 10 * 0.8 - 8.1, places=2)   # the bet at its price
+        ctl.bot.live = {"mid": 0.9}                                          # the price moved: so does the balance
+        self.assertAlmostEqual(ctl.status()["balance"], 200 + 12.5 + 10 * 0.9 - 8.1, places=2)
+        ctl.bot.live = {}
         ctl.bot.bet = None
         self.assertEqual(ctl.put_settings({"budget_usd": 0})["balance"], 1000)   # no budget: the account
+
+    def test_history_has_every_bet(self):
+        from poly_bot.trades import append_trade
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        for i in range(130):
+            append_trade(ctl.cfg.trade_log, {"time": f"2026-11-14 00:{i // 60:02d}:{i % 60:02d}", "round": f"r{i}",
+                                             "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8,
+                                             "cost": 8, "fee": 0.1, "result": "up", "payout": 10, "pnl": 2,
+                                             "total_pnl": 2 * (i + 1), "balance": 1000})
+        ctl.reset()
+        s = ctl.status()
+        self.assertEqual((len(s["trades"]), s["trade_count"]), (100, 130))      # the 2 s status: newest 100
+        h = ctl.history()
+        self.assertEqual((len(h["trades"]), h["trades"][0]["round"], h["trades"][-1]["round"]), (130, "r129", "r0"))
+        self.assertEqual([e["kind"] for e in h["events"]], ["reset"])
 
     def test_reset_only_ladder_keeps_profit_and_counts(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
@@ -109,15 +128,45 @@ class AppTest(unittest.TestCase):
         s = ctl.status()
         self.assertEqual((s["halted"], s["phase"]), ("", "idle"))  # an asked-for stop isn't shown as a halt
 
-    def test_simulate_uses_form_settings_and_budget(self):
+    def test_simulate_adds_the_price_gap_measured_on_own_bets(self):
+        import random
+        from unittest import mock
+        from poly_bot.simulate import DEFAULT_GAP, entry_for
+        from poly_bot.trades import append_trade
+        rng = random.Random(5)
+        rounds = []
+        for i in range(300):
+            res = rng.choice(["up", "down"])
+            end_p = 0.9 if res == "up" else 0.1
+            rounds.append({"slug": f"r{i}", "start": 1000.0 + 300 * i, "end": 1300.0 + 300 * i, "result": res,
+                           "h": [[t, round(0.5 + (end_p - 0.5) * t / 300, 3)] for t in range(-30, 301, 60)]})
+
+        class FakeHistory:
+            def __init__(self, pm):
+                pass
+
+            def rounds(self, coin, tf):
+                return rounds, None
+
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
-        r = ctl.simulate({"bets": 200, "runs": 50, "market": "fair", "settings": {"entry_mode": "hit", "hit_price": 0.75}})
-        self.assertEqual((r["bets"], r["runs"], r["price"], r["bankroll"]), (200, 50, 0.75, 1000))
-        self.assertAlmostEqual(r["p_win"], 0.75)                 # fair market by default
-        r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "win_chance": "80", "market": "fair"})
-        self.assertEqual((r["bankroll"], r["p_win"], r["price"]), (300, 0.8, ctl.cfg.max_price))
+        form = {"entry_mode": "time", "time_left_sec": 120}
+        with mock.patch("poly_bot.web.History", FakeHistory):
+            r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "settings": form})
+        self.assertEqual((r["bankroll"], r["mode"]), (300, "real"))
+        self.assertEqual((r["gap"]["gap"], r["gap"]["measured"]), (DEFAULT_GAP["time"], False))   # no own bets yet
         self.assertEqual(ctl.cfg.entry_mode, "side")             # simulate doesn't save
+        ctl.put_settings(form)
+        for rnd in rounds[:40]:                                  # the bot really paid 3 cents above the replay
+            _, side, price = entry_for(ctl.cfg, rnd)
+            append_trade(ctl.cfg.trade_log, {"time": "2026-11-14 00:00:00", "round": rnd["slug"], "title": "t",
+                                             "side": side, "step": 1, "shares": 10, "price": price + 0.03,
+                                             "cost": 8, "fee": 0.1, "result": rnd["result"], "payout": 0, "pnl": 0,
+                                             "total_pnl": 0, "balance": 1000})
+        with mock.patch("poly_bot.web.History", FakeHistory):
+            r = ctl.simulate({"bets": 100, "runs": 10})
+        self.assertEqual((r["gap"]["measured"], r["gap"]["bets"]), (True, 40))
+        self.assertAlmostEqual(r["gap"]["gap"], 0.03, places=3)
 
     def test_simulate_real_replays_past_rounds(self):
         import random

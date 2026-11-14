@@ -8,6 +8,7 @@ and a localhost Host header, so other websites open in your browser can't drive 
 from __future__ import annotations
 
 import collections
+import calendar
 import json
 import logging
 import random
@@ -29,7 +30,7 @@ from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
 from .history import MIN_ROUNDS, CoinPaths, History
-from .simulate import simulate
+from .simulate import DEFAULT_GAP, price_gap, simulate
 from .strategy import build_ladder, buy_cap, plan_price, recover_part, steps_that_fit, streak_sizing
 from .trades import append_event, read_events, read_trades
 
@@ -122,6 +123,26 @@ class Controller:
             return self.bot.client.balance()
         except Exception:  # noqa: BLE001 - the page shows "–" and the Keys panel says why
             return None
+
+    def portfolio(self) -> Optional[dict]:
+        """The account like Polymarket's Portfolio: {"cash", "positions", "total"}. Live: from Polymarket (every
+        position on the wallet). Paper: the paper cash plus this bot's open bet at its price now."""
+        c = self.bot.client
+        if hasattr(c, "portfolio"):
+            try:
+                p = c.portfolio()
+            except Exception:  # noqa: BLE001
+                return None
+            # Polymarket's value can lag a fresh bet by a minute: never show less than this bot's own open bet
+            mine = self.bot.bet_value() + c.unclaimed()
+            if p and mine > p["positions"] + 0.005:
+                p = {**p, "positions": round(mine, 2), "total": round(p["cash"] + mine, 2)}
+            return p
+        cash = self.wallet()
+        if cash is None:
+            return None
+        pos = self.bot.bet_value()
+        return {"cash": round(cash, 2), "positions": round(pos, 2), "total": round(cash + pos, 2)}
 
     def balance(self) -> Optional[float]:
         """The bot's own balance: Budget + profit since Reset - the open bet when a Budget is set (each bot plays
@@ -286,41 +307,58 @@ class Controller:
         return self._ladder(cfg, price, 1, 0.0, fresh=True)
 
     def simulate(self, body: dict) -> dict:
-        """These settings (the form's, saved or not) over many bets in a fair market. See simulate.py."""
+        """These settings (the form's, saved or not) over the real past rounds, with the price gap the owner's own
+        bots really paid (price_gap). See simulate.py."""
         values = {**self.cfg.settings(), **{k: v for k, v in (body.get("settings") or {}).items() if k in FIELDS}}
         cfg = BotConfig(self.folder, **values)
         cfg.validate()
         try:
             bankroll = float(body.get("bankroll") or 0)
             bets, runs = int(body.get("bets") or 1000), int(body.get("runs") or 1000)
-            chance = body.get("win_chance")
-            chance = None if chance in (None, "") else float(chance) / 100
         except (TypeError, ValueError):
-            raise ValueError("Bets, runs, budget and win chance must be numbers")
+            raise ValueError("Bets, runs and budget must be numbers")
         if bankroll <= 0:
             bankroll = self._budget(cfg)
-        rounds = None
-        if body.get("market", "real") == "real":           # replay past rounds (history.py)
-            history = HISTORY if self.pm is PM else History(self.pm)
-            rounds, progress = history.rounds(cfg.coin, cfg.timeframe)
-            if len(rounds) < MIN_ROUNDS:
-                if progress and progress.get("error") and not (progress["total"] or progress["done"]):
-                    raise ValueError(f"Couldn't load past rounds from Polymarket: {progress['error']}")
-                return {"loading": progress or {"done": 0, "total": 0}, "have": len(rounds)}
-            if cfg.move_mode:                                 # needs the coin's own price inside each round
-                paths, coin_progress = COIN_PATHS.paths(cfg.coin, cfg.timeframe, rounds)
-                with_path = [{**r, "coin": paths[r["slug"]]} for r in rounds if r["slug"] in paths]
-                if coin_progress or len(with_path) < MIN_ROUNDS:
-                    if not coin_progress and len(with_path) < MIN_ROUNDS:
-                        raise ValueError(f"Couldn't load {cfg.coin}'s past prices (Binance {cfg.coin}USDT) for "
-                                         f"the move mode.")
-                    return {"loading": {**coin_progress, "what": f"{cfg.coin} prices"}, "have": len(with_path)}
-                rounds = with_path
-            chance = None
-        out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, chance, rounds=rounds)
+        # always the real past rounds (history.py); no fair coin since 2026-11-14
+        history = HISTORY if self.pm is PM else History(self.pm)
+        rounds, progress = history.rounds(cfg.coin, cfg.timeframe)
+        if len(rounds) < MIN_ROUNDS:
+            if progress and progress.get("error") and not (progress["total"] or progress["done"]):
+                raise ValueError(f"Couldn't load past rounds from Polymarket: {progress['error']}")
+            return {"loading": progress or {"done": 0, "total": 0}, "have": len(rounds)}
+        if cfg.move_mode:                                 # needs the coin's own price inside each round
+            paths, coin_progress = COIN_PATHS.paths(cfg.coin, cfg.timeframe, rounds)
+            with_path = [{**r, "coin": paths[r["slug"]]} for r in rounds if r["slug"] in paths]
+            if coin_progress or len(with_path) < MIN_ROUNDS:
+                if not coin_progress and len(with_path) < MIN_ROUNDS:
+                    raise ValueError(f"Couldn't load {cfg.coin}'s past prices (Binance {cfg.coin}USDT) for "
+                                     f"the move mode.")
+                return {"loading": {**coin_progress, "what": f"{cfg.coin} prices"}, "have": len(with_path)}
+            rounds = with_path
+        g = price_gap(rounds, self._own_bets(cfg))
+        gap = g["gap"] if g["measured"] else DEFAULT_GAP.get(cfg.entry_mode, 0.04)
+        out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, None, rounds=rounds, gap=gap)
+        out["gap"] = {**g, "gap": gap}
         out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
         self.log.info("Simulated %d runs x %d bets from $%.2f at %.2f: average %+.2f, %.0f%% end in profit", runs,
                       bets, bankroll, out["price"], out["average"], out["profit_chance"] * 100)
+        return out
+
+    def _own_bets(self, cfg: BotConfig) -> list:
+        """The real bets (paper and live) of this owner's bots with the same coin, timeframe and Bet mode, each with
+        its bot's settings: what price_gap() measures the replay against."""
+        out = []
+        for folder in sorted(p for p in self.folder.parent.iterdir() if (p / "config.json").is_file()):
+            try:
+                other = load_config(folder / "config.json")
+            except Exception:  # noqa: BLE001 - a broken bot folder just doesn't count
+                continue
+            if (other.coin, other.timeframe, other.entry_mode) != (cfg.coin, cfg.timeframe, cfg.entry_mode):
+                continue
+            for net in ("paper", "live"):
+                for t in read_trades(folder / f"trades-{net}.csv"):
+                    out.append({"cfg": other, "round": t["round"], "side": t["side"], "price": t["price"],
+                                "at": placed_in_round(t)})
         return out
 
     def _ladder(self, cfg: BotConfig, price: float, step: int, base: float, fresh: bool = False) -> dict:
@@ -415,6 +453,7 @@ class Controller:
             "settings": self.cfg.settings(),
             "balance": None if (bal := self.balance()) is None else round(bal, 2),
             "wallet": None if (w := self.wallet()) is None else round(w, 2),
+            "portfolio": self.portfolio(),
             "keys": keys_view(read_keys(self.folder)), "live_check": self.last_check,
             "unclaimed": round(b.client.unclaimed(), 2) if hasattr(b.client, "unclaimed") else 0.0,
             "start_balance": round(float(b.client.data.get("start_balance", 0)), 2),
@@ -432,6 +471,13 @@ class Controller:
             "trade_count": len(trades),
             "log": list(self.lines.lines)[-150:],
         }
+
+
+    def history(self) -> dict:
+        """Every logged bet (newest first) and every event: the page's "Show all" and CSV download. status() sends
+        only the newest 100 bets, every 2 s."""
+        trades = read_trades(self.cfg.trade_log)
+        return {"trades": list(reversed(trades)), "events": read_events(self.folder), "trade_count": len(trades)}
 
 
 def streak_bets(trades: list[dict], step: int) -> list[dict]:
@@ -626,6 +672,17 @@ def settings_diff(old: dict, new: dict) -> list[str]:
     return out
 
 
+def placed_in_round(t: dict) -> Optional[float]:
+    """Seconds into its round a logged bet was placed ("placed" is JST; the slug ends with the round's start), or
+    None for old rows without it."""
+    try:
+        start = int(t["round"].rsplit("-", 1)[1])
+        placed = calendar.timegm(time.strptime(t["placed"], "%Y-%m-%d %H:%M:%S")) - 9 * 3600
+        return placed - start
+    except (KeyError, ValueError, IndexError, TypeError):
+        return None
+
+
 ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and pins
 
 BOT_PATH = re.compile(r"^/api/bots/([A-Za-z0-9_-]{1,30})/([a-z_]+)$")
@@ -680,6 +737,8 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
             m = BOT_PATH.match(path)
             if m and m.group(2) == "status":
                 return self._call(lambda: app.get(m.group(1)).status())
+            if m and m.group(2) == "history":
+                return self._call(lambda: app.get(m.group(1)).history())
             self._json(404, {"error": "not found"})
 
         def do_POST(self):

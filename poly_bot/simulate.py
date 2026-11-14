@@ -16,8 +16,12 @@ Pure logic, no I/O. Two ways to get each bet's price and result:
   The price paid is the path's price plus SPREAD (the ask is a little above the mid). A bet is only placed once the
   previous one is paid out (SETTLE_SEC after its round ends), like the bot. Runs stitch random half-day stretches
   of the history together, so each run sees real streaks but runs differ.
-- **fair**: every bet at one price (the ladder table's), winning with that chance (or the Win chance given): a
-  market the bot can't predict.
+  Then the **price gap** is added: 1-minute history can't show how fast prices move, so the replay's prices come
+  out cheaper than what the bots really pay. price_gap() measures it on the owner's own bots' real bets (same
+  mode, same rounds: real price paid minus the replay's), falling back to DEFAULT_GAP (measured 2026-11-14 on
+  BTC 5m: side -0.2c, hit +4.6c, time +4.0c, move +13.7c) until there are MIN_GAP_BETS of them.
+- **fair** (tests only, not offered on the page since 2026-11-14: "everything ... based on real history"): every
+  bet at one price, winning with that chance.
 
 Sizing, fees, the 5-share minimum, Recover over N wins, Steps to survive, Max losses in a row and the budget are the
 bot's own (strategy.py). Not modelled: walking the order book beyond SPREAD, Until earn. A ladder end restarts at
@@ -40,6 +44,10 @@ SPREAD = 0.01                 # the ask is about a cent above the path's (mid) p
 HIT_FILL = 0.6                # hit mode: how far from the Hit price to the next recorded price the fill lands
 SETTLE_SEC = 170              # a round's result comes about this long after it ends (from the bots' history)
 BLOCK_SEC = 12 * 3600         # runs are stitched from random stretches of this length
+# what the bots really paid above the replay's price, per Bet mode (BTC 5m paper bots' bets, 2026-11-14)
+DEFAULT_GAP = {"side": 0.0, "hit": 0.046, "time": 0.04, "move": 0.137}
+GAP_MATCH_SEC = 90            # a real bet counts if placed within this of where the replay buys
+MIN_GAP_BETS = 30             # own real bets needed before the measured gap replaces DEFAULT_GAP
 
 
 # --- entries: where the bot would have bought in one past round ---------------------------------------------------
@@ -126,16 +134,49 @@ def entry_for(cfg, rnd: dict, side: Optional[str] = None) -> Optional[tuple]:
     return None
 
 
+def with_gap(e: Optional[tuple], gap: float, cap: float) -> Optional[tuple]:
+    """An entry with the price gap added; None if that real price is above Pay at most (the bot wouldn't buy)."""
+    if e is None or not gap:
+        return e
+    price = min(0.99, max(0.01, round(e[2] + gap, 2)))
+    return None if price > cap + 1e-9 else (e[0], e[1], price)
+
+
+def price_gap(rounds: list, bets: list) -> dict:
+    """How much more the bots really paid than the replay says: bets = [{"cfg", "round" (slug), "side", "price",
+    "at" (seconds into the round it was placed, or None)}]
+    of the owner's bots in this Bet mode; each is compared with entry_for(its bot's settings) on the same round,
+    when the replay picks the same side. {"gap", "bets", "measured"}; DEFAULT_GAP while there are too few."""
+    by = {r["slug"]: r for r in rounds}
+    diffs = []
+    for b in bets:
+        r = by.get(b["round"])
+        e = entry_for(b["cfg"], r, b["side"]) if r else None
+        if not e or e[1] != b["side"]:
+            continue
+        # a bet placed far from where the replay buys was made under other settings (the bot's mode or prices were
+        # changed since): it says nothing about this mode's prices
+        at = b.get("at")
+        if at is not None and abs(at - e[0]) > GAP_MATCH_SEC:
+            continue
+        diffs.append(float(b["price"]) - e[2])
+    mode = getattr(bets[0]["cfg"], "entry_mode", "side") if bets else None
+    if len(diffs) >= MIN_GAP_BETS:
+        return {"gap": round(statistics.fmean(diffs), 4), "bets": len(diffs), "measured": True}
+    return {"gap": None, "bets": len(diffs), "measured": False, "mode": mode}
+
+
 class RealFeed:
     """Hands out one run's bets from the past rounds, in order, with random jumps between half-day stretches."""
 
-    def __init__(self, cfg, rounds: list, rng: random.Random):
-        self.cfg, self.rounds, self.rng = cfg, rounds, rng
+    def __init__(self, cfg, rounds: list, rng: random.Random, gap: float = 0.0):
+        self.cfg, self.rounds, self.rng, self.gap, self.cap = cfg, rounds, rng, gap, buy_cap(cfg)
         self.side_mode = getattr(cfg, "entry_mode", "side") == "side"
         length = rounds[0]["end"] - rounds[0]["start"] if rounds else 300
         self.block = max(20, int(BLOCK_SEC // length))
         if not self.side_mode:   # hit and time mode: the entry doesn't depend on the ladder, so work it out once
-            self.fixed = [entry_for(cfg, r) for r in rounds]
+            self.raw = [entry_for(cfg, r) for r in rounds]            # the replay's own price (shown as "Best")
+            self.fixed = [with_gap(e, gap, self.cap) for e in self.raw]
             if not any(self.fixed):
                 raise ValueError("No past round had an entry with these settings (e.g. the price never reached the "
                                  "Hit price within Pay at most): nothing to simulate.")
@@ -160,9 +201,10 @@ class RealFeed:
             if self.side_mode:
                 p = _price_at(r["h"], 0)
                 side = choose_side(self.cfg, lad, self.last_result, {"up": _ask(p), "down": _ask(1 - p)}, self.rng)
-                e = entry_for(self.cfg, r, side)
+                raw = entry_for(self.cfg, r, side)
+                e = with_gap(raw, self.gap, self.cap)
             else:
-                e = self.fixed[k]
+                raw, e = self.raw[k], self.fixed[k]
             last, self.last_result = self.last_result, r["result"]
             if e is None:                      # no entry in this round with these settings
                 self.skipped += 1
@@ -171,7 +213,9 @@ class RealFeed:
                 continue                       # still waiting for the previous bet's result
             t, side, price = e
             self.free_at = r["end"] + SETTLE_SEC
-            return price, r["result"] == side, {"round": r["start"], "side": side, "at": round(t)}
+            return price, r["result"] == side, {"round": r["start"], "end": r["end"], "slug": r.get("slug", ""),
+                                                "paid_at": r["end"] + SETTLE_SEC, "side": side, "at": round(t),
+                                                "best": raw[2] if raw else price}
         raise ValueError("No past round had an entry with these settings: nothing to simulate.")
 
 
@@ -187,7 +231,7 @@ class FairFeed:
 # --- the ladder over many runs ----------------------------------------------------------------------------------
 def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1000,
              win_chance: Optional[float] = None, seed: Optional[int] = None,
-             rounds: Optional[list] = None) -> dict:
+             rounds: Optional[list] = None, gap: float = 0.0) -> dict:
     """Run the ladder `runs` times for up to `bets` bets each, starting with `bankroll` USDC to lose.
     rounds: past rounds (history.py) to replay; None = a fair market at `price` (win chance = price or win_chance)."""
     if bets < 1 or runs < 1:
@@ -232,7 +276,7 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
     paths = []
     every = max(1, bets // PATH_POINTS)
     for run in range(runs):
-        feed = RealFeed(cfg, rounds, rng) if rounds is not None else FairFeed(price, p_win, rng)
+        feed = RealFeed(cfg, rounds, rng, gap) if rounds is not None else FairFeed(price, p_win, rng)
         lad = SimpleNamespace(rounds_bet=0, last_side="", last_won=None)     # what the Side mode looks at
         pnl = peak = worst_dd = 0.0
         step, owed, wins_left, base = 1, 0.0, 0, 0.0
@@ -330,15 +374,17 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
         "log": log, "log_bets": bet_counts[0],
     }
     if rounds is not None:
-        out["history"] = history_summary(cfg, rounds)
+        out["history"] = history_summary(cfg, rounds, gap)
     return out
 
 
-def history_summary(cfg, rounds: list) -> dict:
+def history_summary(cfg, rounds: list, gap: float = 0.0) -> dict:
     """What the replay was based on: the rounds' span, and how the entries' prices and results came out per round
     (each past round once, whatever the ladder did)."""
     side = getattr(cfg, "entry_mode", "side") == "side"
-    pairs = [(r, entry_for(cfg, r, getattr(cfg, "first_side", "up")) if side else entry_for(cfg, r)) for r in rounds]
+    cap = buy_cap(cfg)
+    pairs = [(r, with_gap(entry_for(cfg, r, getattr(cfg, "first_side", "up")) if side else entry_for(cfg, r), gap, cap))
+             for r in rounds]
     es = [(r, e) for r, e in pairs if e]
     wins = sum(1 for r, e in es if r["result"] == e[1])
     prices = sorted(e[2] for _, e in es)

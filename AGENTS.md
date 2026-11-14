@@ -179,7 +179,10 @@ The legacy `py-clob-client` is superseded: don't use it.
   "right away / after a win" like bcauto; bot list drag + pin like hyperliquid; round volume must be real time
   (Gamma's lags: use the CLOB WebSocket, `volume.py`).
 - **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13) and 1.1.0 ("c and p minor
-  update", same day), 1.2.0 ("c can p with minor update", 2026-11-14).
+  update", same day), 1.2.0 ("c can p with minor update", 2026-11-14), 1.3.0 ("c and p with minor update", 2026-11-14).
+- **No fair coin, real prices (2026-11-14):** "i want everything with this have to be based on real history and
+  reality." The simulation only replays past rounds, and adds the price gap measured on the owner's own bots'
+  real bets (simulate.price_gap). Don't add made-up markets or optimistic fills back.
 - **Simulation must be real (2026-11-13):** "plz simulate as real for all modes." Default = replay past rounds
   (`history.py`, `simulate.entry_for`); keep its entry rules in step with the engine's when a mode changes. Hit
   fills are calibrated (`HIT_FILL`) on the paper bots' real fills: re-check against more fills later.

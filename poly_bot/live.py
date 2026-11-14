@@ -25,6 +25,8 @@ from typing import Optional
 from . import secretbox
 from .config import write_json
 from .markets import Polymarket, Round, get_json
+
+DATA_API = "https://data-api.polymarket.com"
 from .strategy import Fill, ceil2, fee_per_share, walk_asks
 
 KEY_VARS = ("POLY_PRIVATE_KEY", "POLY_WALLET", "POLY_RELAYER_KEY", "POLY_RELAYER_ADDRESS")
@@ -120,6 +122,7 @@ class LiveClient:
             except ValueError:
                 pass
         self._balance_cache = (0.0, 0.0)       # (value, time)
+        self._positions_cache = (None, 0.0)     # (value of open and unclaimed positions, time)
         self._next_claim = 0.0
 
     def _save(self) -> None:
@@ -186,6 +189,23 @@ class LiveClient:
 
     def unclaimed(self) -> float:
         return sum(c["shares"] for c in self.data["claims"].values())
+
+    def portfolio(self) -> Optional[dict]:
+        """The whole account like Polymarket's Portfolio: cash (pUSD) plus every position's value now (open bets of
+        every bot on this wallet, and won shares not claimed yet), from Polymarket's data API. Cached 15 s; None when
+        it can't be read."""
+        value, at = self._positions_cache
+        if value is None or time.time() - at > 15:
+            try:
+                d = get_json(DATA_API + "/v2/value", {"user": str(self.sdk.wallet)}, timeout=5, tries=1)
+                value = float((d.get("data") or {}).get("value") or 0.0)
+                self._positions_cache = (value, time.time())
+            except Exception as e:  # noqa: BLE001 - the tile shows cash only
+                self.log.debug("Couldn't read the positions' value: %s", e)
+                if value is None:
+                    return None
+        cash = self.balance() - self.unclaimed()
+        return {"cash": round(cash, 2), "positions": round(value, 2), "total": round(cash + value, 2)}
 
     def buy(self, r: Round, side: str, shares: float, max_price: float) -> Optional[Fill]:
         """Buy about `shares` of `side` in round r with a fill-or-kill market order; None if the book can't fill it."""

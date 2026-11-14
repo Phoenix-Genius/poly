@@ -69,7 +69,7 @@ FIELDS: dict[str, tuple] = {
                      "streak (step 1), so it grows after wins. 0 (or empty) = off."),
     "max_steps": (0, "int", None, "Max losses in a row",
                   "End the ladder after this many losses in a row. 0 = no fixed limit, the budget decides."),
-    "on_ladder_end": ("stop", "select", ["stop", "reset"], "When the ladder ends",
+    "on_ladder_end": ("reset", "select", ["stop", "reset"], "When the ladder ends",
                       "What to do after max losses in a row, or when the budget can't pay the next bet. "
                       "stop = halt the bot (you press Reset). reset = accept the loss and restart at step 1."),
     # --- side -------------------------------------------------------------------------------------------

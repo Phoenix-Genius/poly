@@ -144,8 +144,11 @@ that way, and the next bet waits until the previous one is paid out (about 3 min
 random half-day stretches of the history together, so each sees real streaks but runs differ. A week is a small
 sample: past results don't promise future ones.
 
-**Market: Fair coin** prices every bet at the ladder table's price and lets it win as often as that price says (or
-the **Win chance** you enter): a market the bot can't predict, where the fee makes every setting lose a little.
+**Price gap:** 1-minute prices look cheaper than what the bot really pays (prices jump within seconds), so every
+bet's price is raised by how much more your own bots really paid than the replay says, on the same rounds (your
+bots' bets in the same coin, timeframe and Bet mode, placed within 90 s of where the replay buys). Until there are
+30 such bets a default per mode is used (BTC 5m, 2026-11-14: side 0, hit +4.6¢, time +4.0¢, move +13.7¢). There is
+no made-up "fair coin" market: everything comes from real rounds and real fills.
 
 Sizing, Polymarket's fee, the 5-share minimum, Recover over N wins, Steps to survive, Max losses in a row and the
 budget are the bot's own. A ladder end starts again at step 1 with the money left; a run stops when even step 1 no
@@ -171,7 +174,7 @@ ladder end / used up the budget, the longest losing streak, the win rate against
 | `recover_wins` | 1 | **Recover over (wins)**, recover sizing: how many wins pay back a losing streak. 1 = one win pays back everything (bets ~2× per loss). 2 = each win pays back half of what is still owed plus the Profit per win (~1.5× per loss), 3 = a third (~1.35×). The rest is carried to the next bets; a loss spreads the debt over N wins again. |
 | `target_steps` | 0 (= off) | Steps to survive: works out the first bet (Profit per win, or Starting bet with multiply) so the budget pays for this many losses in a row even at the Max price. Recalculated at each new streak from the budget left. |
 | `max_steps` | 0 (= budget decides) | End the ladder after this many losses in a row. |
-| `on_ladder_end` | stop | `stop` = halt (press Reset, or Reset ▾ → Reset only ladder to keep the profit and counts). `reset` = accept the loss and start again at step 1. |
+| `on_ladder_end` | reset | `stop` = halt (press Reset, or Reset ▾ → Reset only ladder to keep the profit and counts). `reset` = accept the loss and start again at step 1. |
 | `entry_mode` | side | `side` = pick a side by `side_mode` and buy it within Min/Max price in the entry window. `hit` = watch both sides and buy whichever first reaches `hit_price`, any time in the round. `time` = when `time_left_sec` are left, buy the leading (dearer) side. `move` = when the coin is `move_usd` dollars from the Price To Beat, buy that way. In hit and time mode side mode and Min/Max price are unused. |
 | `move_usd` | 50 | move mode: bet when the coin's live price (Chainlink, what rounds settle on) is this many dollars above the round's Price To Beat (Up) or below it (Down); any time in the round unless `entry_window_sec` is set. |
 | `time_left_sec` | 120 | time mode: bet when this many seconds are left; if the leader's price isn't within the limits then, keep checking until 5 s before the end. |

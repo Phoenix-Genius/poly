@@ -154,6 +154,8 @@
   .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 2px; cursor: help; }
   .field input, .field select { width: 100%; padding: 4px 8px; font-size: 13px; border: 1px solid var(--line); background: var(--input); }
   .field .help { font-size: 12px; color: var(--muted); margin-top: 3px; display: none; }
+  .rec-star { color: var(--amber); font-weight: 700; }
+  .field .rec { font-size: 11px; color: var(--muted); margin-top: 2px; cursor: help; }
   .field:focus-within .help { display: block; }   /* compact: a field's help shows while you edit it */
   .field.hide { display: none; }
   .savebar { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px;
@@ -226,7 +228,7 @@
   .simchart .grid-line { stroke: var(--line); } .simchart .zero { stroke: var(--muted); stroke-dasharray: 3 3; }
   .simchart .bar-loss { fill: var(--red); } .simchart .bar-gain { fill: var(--accent); }
   .simchart .path { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .75; }
-  .simlog { margin-top: 10px; } .simlog summary { cursor: pointer; padding: 4px 0; } .simlog .scroll { max-height: 420px; overflow: auto; } .simlog tr.ev td { text-align: left; color: var(--amber); font-weight: 600; }
+  .simlog { margin-top: 10px; } .simlog summary { cursor: pointer; padding: 4px 0; } .simlog .scroll { max-height: 420px; overflow: auto; }
   .simhelp { font-size: 12px; color: var(--muted); margin: 4px 0; }
   .chance b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--up); }
 
@@ -497,7 +499,7 @@ function renderBots() {
 }
 function select(id) {
   if (formDirty && id !== current && !confirm("Discard unsaved settings?")) return;
-  current = id; localStorage.setItem("bot", id); formDirty = false; status = null;
+  current = id; localStorage.setItem("bot", id); formDirty = false; status = null; histAll = false;
   if (id && location.hash !== "#bot=" + id) history.replaceState(null, "", "#bot=" + id);
   renderBots(); buildForm(); refresh();
 }
@@ -525,9 +527,9 @@ const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
+  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "move_usd", "hit_max_price", "side_mode", "first_side"]},
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
-  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "move_usd", "hit_max_price", "side_mode", "first_side"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
 ];
 const WIDE = ["bot_name"];
@@ -560,7 +562,8 @@ function fieldHtml(f) {
   const spread = f.key !== "min_price" ? "" : `<div class="field wide" data-key="price_spread"><label title="${esc(SPREAD_HELP)}">Price ± (cents)</label>` +
     `<div class="spread-row"><input id="spread" type="range" min="1" max="25" step="1" value="5"><b id="spreadVal"></b></div>` +
     `<div class="help">${esc(SPREAD_HELP)}</div></div>`;
-  return spread + `<div class="field ${WIDE.includes(f.key) ? "wide" : ""}" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}</label>${input}<div class="help">${esc(f.help)}</div></div>`;
+  const rec = f.key in RECOMMEND ? ' <span class="rec-star" title="Has a recommended value (below)">*</span>' : "";
+  return spread + `<div class="field ${WIDE.includes(f.key) ? "wide" : ""}" data-key="${f.key}"><label title="${esc(f.help)}">${esc(f.label)}${rec}</label>${input}${f.key in RECOMMEND ? `<div class="rec" data-rec="${f.key}"></div>` : ""}<div class="help">${esc(f.help)}</div></div>`;
 }
 function buildForm() {
   const form = $("#form");
@@ -598,8 +601,26 @@ function formValues() {
   for (const el of document.querySelectorAll("#form input[name], #form select[name]")) out[el.name] = el.type === "checkbox" ? el.checked : el.value;
   return out;
 }
+// settings with a recommended value (from the real-history tests, 2026-11-14), shown under the box with a *
+const RECOMMEND = {
+  recover_wins: v => {
+    const cap = +v.hit_max_price, cheap = v.entry_mode !== "side" && cap > 0 && cap <= 0.85;
+    return cheap ? ["1–2", "with Pay at most ≤ 0.85 losses are small: 1–2 were the steadiest"]
+                 : ["3 or more", "without a low Pay at most a loss is big (bets up to 0.99): spreading it over 3+ wins kept more runs alive"];
+  },
+};
+function showRecs(v) {
+  for (const [k, fn] of Object.entries(RECOMMEND)) {
+    const el = $(`.rec[data-rec="${k}"]`); if (!el) continue;
+    const [val, why] = fn(v), now = String(v[k] ?? "");
+    const ok = val.includes("or more") ? +now >= parseInt(val) : val.split("–").map(Number).some((a, i, r) => r.length > 1 ? +now >= r[0] && +now <= r[1] : +now === a);
+    el.innerHTML = `<span class="rec-star">*</span> Recommended: <b>${esc(val)}</b>${ok ? ' <span class="pos">✓</span>' : ""}`;
+    el.title = why;
+  }
+}
 function showFields() {
   const v = formValues();
+  showRecs(v);
   const auto = +v.target_steps > 0;   // Steps to survive works out the first bet: its box isn't used then
   for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier" && k !== "recover_wins"));
   // each Bet mode shows only its own fields: side = Side mode + Min/Max price + Entry window, hit = Hit price,
@@ -725,7 +746,7 @@ function render() {
     </div>
     <div class="tiles">
       <div class="tile" style="--tone:var(--accent)"><div class="k" title="${s.settings.budget_usd > 0 ? "This bot's own money: Budget + profit since Reset - the open bet" : "The whole account"}">💰 ${s.settings.budget_usd > 0 ? "Budget balance" : s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${s.settings.budget_usd > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
-      ${s.settings.budget_usd > 0 ? `<div class="tile" style="--tone:var(--muted)"><div class="k" title="Everything in this Polymarket account, shared by every bot that uses it">🏦 ${s.network === "live" ? "Account balance" : "Paper account"}</div><div class="v num">${s.wallet == null ? "–" : money(s.wallet)}</div></div>` : ""}
+      ${s.settings.budget_usd > 0 ? `<div class="tile" style="--tone:var(--muted)"><div class="k" title="The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
@@ -736,7 +757,7 @@ function render() {
     ${betPanel(s)}
     <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Martingale ladder <span class="sum" id="ladderSum"></span></h2>
       <div class="body"><div class="ladder-tools muted" id="ladderNote"></div><div class="scroll" id="ladderTable"></div></div></section>
-    ${panel("historyPanel", "History", `${s.trade_count} bets`, historyTable(s.trades, s.events || []))}
+    ${panel("historyPanel", "History", `${s.trade_count} bets`, histBar(s) + historyTable(...histRows(s), s.trade_count))}
     ${panel("simPanel", "🎲 Simulation", "what these settings do over many bets", simPanelBody())}
     ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
   `;
@@ -822,7 +843,7 @@ function betPanel(s) {
 }
 // --- simulation (like the hyperliquid bot's): these settings over many bets in a fair market ---
 // The page is re-rendered every few seconds, so the inputs and the last result live here, not in the DOM.
-const simIn = {bets: "1000", runs: "1000", bankroll: "", win: "", market: "real"};
+const simIn = {bets: "1000", runs: "1000", bankroll: ""};
 let simLoading = null;          // {done, total} while past rounds download
 let simResult = null, simFor = "", simBusy = false, simLogOpen = true;
 const sgnMoney = v => money(v, true);
@@ -830,17 +851,15 @@ const pctTxt = x => (x * 100 < 1 && x > 0 ? "<1" : x * 100 > 99 && x < 1 ? ">99"
 function simPanelBody() {
   if (simFor !== current) { simResult = null; simFor = current; }
   const inp = (k, label, ph) => `<div><label>${label}</label><input data-sim="${k}" value="${esc(simIn[k])}" placeholder="${ph}" inputmode="decimal"></div>`;
-  const real = simIn.market === "real";
   return `<div class="simhelp">Plays the ladder bet after bet, many times over, with the settings in the form (saved or not).
       <b>Past rounds</b> replays Polymarket's real rounds of this coin and timeframe (the last ~7 days, price minute by minute) through
       this Bet mode's own entry rule: every bet at the price the bot would really have paid then, winning only if that round really went
-      that way, and the next bet only after the previous one is paid out. <b>Fair coin</b> prices every bet at the ladder's price and lets it
-      win as often as that price says (or your Win chance). Fees, the 5-share minimum and the budget are included. A ladder end starts
+      that way, and the next bet only after the previous one is paid out. Minute-by-minute prices look cheaper than what the bot really
+      pays (prices jump in seconds), so every bet's price is raised by the <b>price gap</b> measured on your own bots' real bets in this
+      Bet mode (same rounds: real price paid minus the replay's). Fees, the 5-share minimum and the budget are included. A ladder end starts
       again at step 1 with the money left.</div>
     <form class="simform" id="simForm">
-      <div><label>Market</label><select data-sim="market"><option value="real" ${real ? "selected" : ""}>Past rounds (real)</option><option value="fair" ${real ? "" : "selected"}>Fair coin</option></select></div>
       ${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
-      ${real ? "" : inp("win", "Win chance (%)", "= price")}
       <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? (simLoading ? "Loading past rounds…" : "Simulating…") : "Run simulation"}</button>
       ${simLoading ? `<span class="simhelp">${simLoading.total ? `Downloading ${simLoading.what ? esc(simLoading.what) + " for the" : ""} past rounds: ${simLoading.done.toLocaleString()} of ${simLoading.total.toLocaleString()}` : "Listing past rounds…"} (once; later only new rounds)</span>` : ""}</form>
     <div id="simOut" style="opacity:${simBusy && simResult ? .45 : 1}">${simResult ? simHtml(simResult) : ""}</div>`;
@@ -850,7 +869,6 @@ function wireSim() {
   const f = $("#simForm"); if (!f) return;
   for (const el of f.querySelectorAll("[data-sim]")) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
     simIn[el.dataset.sim] = el.value;
-    if (el.tagName === "SELECT") render();               // Win chance is only for the fair coin
   });
   f.addEventListener("submit", async e => { e.preventDefault(); runSim(); });
 }
@@ -860,7 +878,7 @@ async function runSim() {
   const id = current;
   try {
     const r = await api(`/api/bots/${id}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll,
-      win_chance: simIn.win, market: simIn.market, settings: formValues()});
+      settings: formValues()});
     if (r.loading && id === current) { simLoading = r.loading; render(); setTimeout(() => id === current ? runSim() : (simBusy = false, simLoading = null), 3000); return; }
     simResult = r;
   } catch (err) { toast(err.message); }
@@ -876,6 +894,9 @@ function simHtml(r) {
     ? `Replayed ${h.rounds.toLocaleString()} past rounds (${day(h.from)} – ${day(h.to)}); the bot would have bought in ${h.with_entry.toLocaleString()} of them,
        at ${h.price_low?.toFixed(2)}–${h.price_high?.toFixed(2)} (median ${h.price_median?.toFixed(2)}). The bets averaged ${r.price.toFixed(3)} and won
        ${(r.p_win * 100).toFixed(1)}%; at those prices ${(r.break_even * 100).toFixed(1)}% is needed to break even after fees`
+       + (r.gap ? `. <b>Price gap ${r.gap.gap >= 0 ? "+" : ""}${(r.gap.gap * 100).toFixed(1)}¢</b> per share added to every bet: ${r.gap.measured
+         ? `measured on ${r.gap.bets} of your bots' real bets in this mode`
+         : `the default for this mode (your bots have ${r.gap.bets} matching real bets; ${30} are needed to measure your own)`}` : "")
     : `Every bet at ${r.price.toFixed(2)}: wins ${(r.p_win * 100).toFixed(1)}% of the time, needs ${(r.break_even * 100).toFixed(1)}% to break even after fees`;
   return `<div class="simhelp">${r.runs.toLocaleString()} runs of ${r.bets.toLocaleString()} bets from ${money(r.bankroll)}${days}.
       ${basis} (<b class="${tone(edge)}">${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)} points</b>).
@@ -897,20 +918,42 @@ function simHtml(r) {
     </div>
     ${simLogHtml(r)}`;
 }
+// run 1's bets laid out exactly like the bot's own History: newest first, the same columns, numbers green/red
+const ET_FMT = new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", month: "long", day: "numeric", hour: "numeric", minute: "2-digit"});
+function etTitle(start, end) {                 // "Bitcoin Up or Down - November 13, 11:35AM-11:40AM ET", like Polymarket's
+  const part = ts => Object.fromEntries(ET_FMT.formatToParts(new Date(ts * 1000)).map(p => [p.type, p.value]));
+  const a = part(start), b = part(end), hm = p => `${p.hour}:${p.minute}${p.dayPeriod}`;
+  return `${status?.coin || ""} Up or Down - ${a.month} ${a.day}, ${hm(a)}-${hm(b)} ET`;
+}
 function simLogHtml(r) {
-  const L = r.log || [], shown = L.filter(t => !t.event).length, real = r.mode === "real";
-  const roundTxt = ts => ts ? new Date((ts + 9 * 3600) * 1000).toISOString().slice(5, 16).replace("T", " ") : "";   // JST, like History
+  const L = r.log || [], shown = L.filter(t => !t.event).length;
   if (!L.length) return "";
-  // the same columns as the bot's own History (no round, side or slippage: the simulation has none)
-  const rows = L.map(t => t.event
-    ? `<tr class="ev"><td colspan="${real ? 13 : 11}">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🛑 Ladder end: back to step 1"}</td></tr>`
-    : `<tr><td class="l num">${t.n}</td>${real ? `<td class="l num">${roundTxt(t.round)}${t.at != null ? ` <small class="muted">+${t.at}s</small>` : ""}</td><td class="l">${sideHtml(t.side)}</td>` : ""}<td class="num">${t.step}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
-      <td class="num">${money(t.cost)}</td><td class="num neg">${money(-t.fee)}</td>
+  const jst = ts => new Date((ts + 9 * 3600) * 1000).toISOString().slice(5, 19).replace("T", " ");   // like History's Paid out
+  const dash = '<span class="muted">–</span>';
+  let lastPaid = null;
+  const rows = L.map(t => {                     // oldest first here; events take the time of the bet before them
+    if (!t.event) { lastPaid = t.paid_at; return t; }
+    return {...t, paid_at: lastPaid};
+  }).reverse().map(t => {
+    if (t.event) return `<tr class="ev ${t.event === "ladder_end" ? "ev-ladder_end" : ""}"><td></td><td class="l num">${t.paid_at ? jst(t.paid_at) : ""}</td><td class="l" colspan="15">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🪜 Ladder ended: back to step 1"}</td></tr>`;
+    const title = t.round ? etTitle(t.round, t.end) : "";
+    const slip = Math.max(0, (t.price - (t.best ?? t.price)) * t.shares);
+    const costs = t.cost ? ((t.fee + slip) / t.cost * 100).toFixed(1) + "%" : dash;
+    return `<tr><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
+      <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)} · bought ${t.at}s in">${esc(shortRound(title))}</a>` : dash}</td>
+      <td class="l">${t.side ? sideHtml(t.side) : dash}</td><td class="num">${t.step}</td>
+      <td class="num" title="The replay's price (1-minute history)">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num" title="With the price gap your bots really pay">${(+t.price).toFixed(3)}</td>
+      <td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
+      <td class="num neg" title="The price gap">${slip > 0.005 ? money(-slip) : "$0.00"}</td><td class="num neg">${money(-t.fee)}</td><td class="num">${costs}</td>
       <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td><td class="num">${money(t.payout)}</td>
-      <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`).join("");
-  return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b></summary>
-    <div class="simhelp">The first ${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets of run 1, oldest first, as the simulation played them, with the ladder ends and the budget running out in between.</div>
-    <div class="scroll"><table><tr><th class="l">#</th>${real ? '<th class="l" title="The past round (JST) and how far into it the bot bought">Round (JST)</th><th class="l">Bet</th>' : ""}<th>Step</th><th>Price</th><th>Shares</th><th>Cost</th><th>Fee</th><th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Budget left</th></tr>${rows}</table></div></details>`;
+      <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`;
+  }).join("");
+  return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b> <span class="muted">${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets</span></summary>
+    <div class="simhelp">Run 1 as the simulation played it, laid out like the bot's History (newest first). Best = the replay's price; Price = what the bot really pays (with the price gap, shown as Slippage). Paid out = about 3 minutes after the round, when the result comes.</div>
+    <div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
+      <th title="The replay's price">Best</th><th title="Price paid, with the price gap">Price</th><th>Shares</th><th>Cost</th>
+      <th title="The price gap: paid above the replay's price">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
+      <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>${rows}</table></div></details>`;
 }
 const SW = 560, SH = 220, SPL = 52, SPR = 8, SPT = 8, SPB = 26;   // chart box (SVG units)
 function niceTicks(lo, hi, n = 4) {
@@ -968,7 +1011,60 @@ function renderLadder() {
   </table>`;
 }
 // the bets, newest first, with Resets and settings changes in between (by time)
-function historyTable(trades, events = []) {
+// "Bitcoin Up or Down - November 13, 10:15AM-10:20AM ET" -> "Nov 13 10:15-10:20AM" (the full title is the tooltip)
+function shortRound(title) {
+  const t = String(title || "").replace(/^.*? - /, "");
+  const m = t.match(/^([A-Z][a-z]{2})[a-z]* (\d+),? (.*?)(?: ET)?$/);
+  if (!m) return t;
+  const span = m[3].replace(/(\d+(?::\d+)?)(AM|PM)-(\d+(?::\d+)?)\2/, "$1-$3$2");   // 10:15AM-10:20AM -> 10:15-10:20AM
+  return `${m[1]} ${m[2]} ${span}`;
+}
+// History shows the newest 100 bets (sent every 2 s); "Show all" loads every bet once, and again when a new one is logged
+let histAll = false, histData = null, histBusy = false;
+function histRows(s) {
+  if (histAll && histData?.id === current) {
+    if (histData.count !== s.trade_count || histData.events !== (s.events || []).length) loadHistory();
+    return [histData.trades, histData.all_events];
+  }
+  return [s.trades, s.events || []];
+}
+async function loadHistory() {
+  if (histBusy) return;
+  histBusy = true;
+  const id = current, ev = (status?.events || []).length;
+  try { const d = await api(`/api/bots/${id}/history`); histData = {id, count: d.trade_count, events: ev, trades: d.trades, all_events: d.events}; }
+  catch (e) { toast(e.message); histAll = false; }
+  histBusy = false;
+  if (id === current) render();
+}
+function histBar(s) {
+  if (!s.trade_count) return "";
+  const shown = histAll && histData?.id === current ? histData.trades.length : Math.min(100, s.trade_count);
+  return `<div class="actions" style="margin-bottom:8px;align-items:center;gap:8px">
+    <span class="muted">Showing ${shown === s.trade_count ? `all ${s.trade_count}` : `the newest ${shown} of ${s.trade_count}`} bets</span>
+    ${s.trade_count > 100 ? `<button class="btn" data-hist="toggle">${histAll ? "Show newest 100" : `Show all ${s.trade_count}`}</button>` : ""}
+    <button class="btn" data-hist="csv" title="Every bet, as a spreadsheet file">⬇ Download CSV</button></div>`;
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-hist]"); if (!b) return;
+  if (b.dataset.hist === "toggle") {
+    histAll = !histAll;
+    if (histAll && histData?.id !== current) { b.disabled = true; b.textContent = "Loading…"; await loadHistory(); } else render();
+    return;
+  }
+  try {                                     // every bet, with the trade log's own columns
+    const d = await api(`/api/bots/${current}/history`);
+    const rows = [...d.trades].reverse();
+    const cols = Object.keys(rows[0] || {});
+    const cell = v => /[",\n]/.test(String(v ?? "")) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? "");
+    const csv = [["#", ...cols].join(","), ...rows.map((r, i) => [i + 1, ...cols.map(c => cell(r[c]))].join(","))].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"}));
+    a.download = `${status?.name || current}-history.csv`.replace(/[^\w.-]+/g, "_");
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (err) { toast(err.message); }
+});
+function historyTable(trades, events = [], total = trades.length) {
   if (!trades.length && !events.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
   // newest first; in the same second an event (e.g. "Ladder ended" after the loss that ended it) is the newer one
   const rows = [...trades, ...events.map(e => ({...e, event: true}))].sort((a, b) => (b.time > a.time) - (b.time < a.time) || (b.event ? 1 : 0) - (a.event ? 1 : 0));
@@ -979,11 +1075,12 @@ function historyTable(trades, events = []) {
     const c = (+t.fee || 0) + (+t.slippage || 0);
     return (c / +t.cost * 100).toFixed(1) + "%";
   };
-  return `<div class="scroll"><table><tr><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
+  let n = total;                         // bets numbered from the oldest (#1); log rows get no number
+  return `<div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
       <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
       <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
-    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc(t.title.replace(/^.*? - /, ""))}</a></td>
+    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a></td>
       <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>

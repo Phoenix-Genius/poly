@@ -108,11 +108,21 @@ class Bot:
             return max(0.0, min(bal, self.cfg.budget_usd + self.ladder.pnl))
         return bal
 
+    def bet_value(self) -> float:
+        """What the open bet is worth now: its shares at the side's price now (5 s old at most while holding; its
+        buy price until the first check)."""
+        if not self.bet:
+            return 0.0
+        mid = self.live.get("mid")
+        return self.bet["shares"] * float(mid if mid is not None else self.bet["price"])
+
     def own_balance(self, wallet: Optional[float] = None) -> Optional[float]:
-        """The bot's balance as shown: with a Budget, its own money (Budget + profit since Reset - the open bet), so
-        several bots on one account each show only theirs; without one, the account's balance."""
+        """The bot's balance as shown: with a Budget, its own money (Budget + profit since Reset, with the open bet
+        at what it's worth now, so it moves with the price), so several bots on one account each show only theirs;
+        without one, the account's balance."""
         if self.cfg.budget_usd > 0:
-            return max(0.0, self.cfg.budget_usd + self.ladder.pnl - (self.bet["cost"] if self.bet else 0.0))
+            open_now = self.bet_value() - self.bet["cost"] if self.bet else 0.0
+            return max(0.0, self.cfg.budget_usd + self.ladder.pnl + open_now)
         return self.client.balance() if wallet is None else wallet
 
     def sizing(self):
