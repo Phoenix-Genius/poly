@@ -5,11 +5,13 @@ import csv
 from pathlib import Path
 
 COLUMNS = ["time", "round", "title", "side", "step", "shares", "price", "cost", "fee", "result", "payout", "pnl",
-           "total_pnl", "balance", "placed", "held_sec", "best_price", "slippage"]
+           "total_pnl", "balance", "placed", "held_sec", "best_price", "slippage", "beat", "coin_at_bet", "coin_end"]
 # placed      when the bet was bought (JST); time is when it was paid out
 # held_sec    seconds from buying to the payout (the round plus Polymarket's wait for the result)
 # best_price  the best ask when the bot decided; price is the average actually paid
 # slippage    (price - best_price) x shares: what walking the order book cost
+# beat        the round's Price To Beat (Chainlink at its start); coin_at_bet / coin_end: the coin's Chainlink price
+#             when the bet was bought / at the round's end (History shows each minus beat)
 # Rows written before these columns existed have them empty.
 
 

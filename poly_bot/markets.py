@@ -24,6 +24,7 @@ from .strategy import DEFAULT_FEE_RATE
 
 GAMMA = "https://gamma-api.polymarket.com"
 CLOB = "https://clob.polymarket.com"
+DATA_API = "https://data-api.polymarket.com"
 SERIES_TF = {"5m": "5m", "15m": "15m", "1h": "hourly", "4h": "4h", "daily": "daily"}   # our name -> slug part
 USER_AGENT = "poly-martingale-bot"
 
@@ -127,8 +128,11 @@ class Polymarket:
         self._results: dict[str, str] = {}       # slug -> result, final once known
         self._lock = threading.Lock()
         from .prices import PriceFeed
-        from .volume import VolumeFeed
+        from .instance import ROOT
+        from .volume import RoundPrices, RoundVolumes, VolumeFeed
         self.volumes = VolumeFeed(clock)         # real-time traded volume per round (one socket for every bot)
+        self.round_volumes = RoundVolumes(self, ROOT / "data" / "round_volumes.json", clock)   # History's Volume
+        self.round_prices = RoundPrices(self, ROOT / "data" / "round_prices.json", clock)      # History's Move at end
         self.coin_prices = PriceFeed(clock)      # live coin prices and Price To Beat, for the move mode
 
     def series_id(self, coin: str, timeframe: str) -> str:
@@ -168,6 +172,37 @@ class Polymarket:
             elif r.start > now and nxt is None:
                 nxt = r
         return current, nxt
+
+    def final_volume(self, slug: str) -> tuple[float, float]:
+        """(USDC traded in the round, its end time). Polymarket's data API (v2/live-volume by the Gamma event id): it
+        has the whole round right after it ends. Gamma's own event volume lags by 20+ minutes (and is missing for
+        some rounds), so it's only the fallback; once caught up the two match to the cent."""
+        found = get_json(f"{GAMMA}/events", {"slug": slug})
+        if not found:
+            raise MarketError(f"round {slug} not found")
+        r = parse_round(found[0])
+        usd = None
+        if found[0].get("id"):
+            try:
+                d = get_json(f"{DATA_API}/v2/live-volume", {"id": found[0]["id"]})
+                usd = (d.get("data") or {}).get("taker_volume_total")
+            except MarketError:
+                pass
+        if usd is None:
+            usd = found[0].get("volume")
+        return float(usd or 0), r.end
+
+    def settled_prices(self, slug: str) -> tuple[Optional[float], Optional[float], float]:
+        """(Price To Beat, final price, round end) that Polymarket settled the round on: Chainlink's BTC/USD TWAP
+        stream (60 s average), in the event's eventMetadata once it has resolved (None, None until then). These are
+        not the spot prices of the live feed or the crypto-price endpoint: in ~1 round in 10 the two give
+        different results."""
+        found = get_json(f"{GAMMA}/events", {"slug": slug})
+        if not found:
+            raise MarketError(f"round {slug} not found")
+        meta = found[0].get("eventMetadata") or {}
+        beat, final = meta.get("priceToBeat"), meta.get("finalPrice")
+        return (float(beat) if beat else None), (float(final) if final else None), parse_round(found[0]).end
 
     def round(self, slug: str) -> Round:
         """A round by slug, with its result as soon as Polymarket knows it.

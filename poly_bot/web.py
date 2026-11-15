@@ -23,14 +23,14 @@ from typing import Optional
 
 from . import __version__
 from .clock import use_jst_in_logs
-from .config import COINS, FIELDS, TIMEFRAMES, BotConfig, load_config, save_settings, write_json
+from .config import COINS, FIELDS, TIMEFRAMES, BotConfig, load_config, save_settings, upgrade, write_json
 from .engine import Bot, fmt_secs
 from .instance import PROFILES_DIR, ROOT, AlreadyRunning, acquire_lock, bot_ids, free_bot_id, slug
 from .markets import MarketError, Polymarket
 from .live import LiveClient, keys_view, read_keys, save_keys
 from .paper import PaperClient
 from .history import MIN_ROUNDS, CoinPaths, History
-from .simulate import DEFAULT_GAP, price_gap, simulate
+from .simulate import default_gap, needs_coin, price_gap, simulate
 from .strategy import build_ladder, buy_cap, plan_price, recover_part, steps_that_fit, streak_sizing
 from .trades import append_event, read_events, read_trades
 
@@ -145,8 +145,8 @@ class Controller:
         return {"cash": round(cash, 2), "positions": round(pos, 2), "total": round(cash + pos, 2)}
 
     def balance(self) -> Optional[float]:
-        """The bot's own balance: Budget + profit since Reset - the open bet when a Budget is set (each bot plays
-        with its budget), else the account's. None when the account can't be read."""
+        """The bot's own balance, with its open bet at what it's worth now: Budget + profit since Reset when a Budget
+        is set (each bot plays with its budget), else the account's cash. None when the account can't be read."""
         w = self.wallet()
         return None if w is None else self.bot.own_balance(w)
 
@@ -303,7 +303,7 @@ class Controller:
             raise ValueError("Price must be between 0.02 and 0.98")
         lad = self.bot.ladder
         if body.get("from_now"):      # the current streak with these settings; else a fresh ladder from step 1
-            return self._ladder(cfg, price, lad.step, lad.base if cfg.target_steps == self.cfg.target_steps else 0)
+            return self._ladder(cfg, price, lad.step, lad.base if cfg.survive_steps == self.cfg.survive_steps else 0)
         return self._ladder(cfg, price, 1, 0.0, fresh=True)
 
     def simulate(self, body: dict) -> dict:
@@ -326,17 +326,17 @@ class Controller:
             if progress and progress.get("error") and not (progress["total"] or progress["done"]):
                 raise ValueError(f"Couldn't load past rounds from Polymarket: {progress['error']}")
             return {"loading": progress or {"done": 0, "total": 0}, "have": len(rounds)}
-        if cfg.move_mode:                                 # needs the coin's own price inside each round
+        if needs_coin(cfg):                               # needs the coin's own price inside each round
             paths, coin_progress = COIN_PATHS.paths(cfg.coin, cfg.timeframe, rounds)
             with_path = [{**r, "coin": paths[r["slug"]]} for r in rounds if r["slug"] in paths]
             if coin_progress or len(with_path) < MIN_ROUNDS:
                 if not coin_progress and len(with_path) < MIN_ROUNDS:
                     raise ValueError(f"Couldn't load {cfg.coin}'s past prices (Binance {cfg.coin}USDT) for "
-                                     f"the move mode.")
+                                     f"the Move condition.")
                 return {"loading": {**coin_progress, "what": f"{cfg.coin} prices"}, "have": len(with_path)}
             rounds = with_path
         g = price_gap(rounds, self._own_bets(cfg))
-        gap = g["gap"] if g["measured"] else DEFAULT_GAP.get(cfg.entry_mode, 0.04)
+        gap = g["gap"] if g["measured"] else default_gap(cfg)
         out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, None, rounds=rounds, gap=gap)
         out["gap"] = {**g, "gap": gap}
         out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
@@ -345,15 +345,20 @@ class Controller:
         return out
 
     def _own_bets(self, cfg: BotConfig) -> list:
-        """The real bets (paper and live) of this owner's bots with the same coin, timeframe and Bet mode, each with
-        its bot's settings: what price_gap() measures the replay against."""
+        """The real bets (paper and live) of this owner's bots with the same coin, timeframe, Bet mode and (conditions
+        mode) the same conditions on as AND/OR, each with its bot's settings: what price_gap() measures the replay
+        against."""
+        def kinds(c: BotConfig) -> tuple:   # conditions mode: the same conditions on (their values may differ)
+            return tuple(sorted(c.conditions().items())) if c.conditions_mode else ()
+
         out = []
         for folder in sorted(p for p in self.folder.parent.iterdir() if (p / "config.json").is_file()):
             try:
                 other = load_config(folder / "config.json")
             except Exception:  # noqa: BLE001 - a broken bot folder just doesn't count
                 continue
-            if (other.coin, other.timeframe, other.entry_mode) != (cfg.coin, cfg.timeframe, cfg.entry_mode):
+            if (other.coin, other.timeframe, other.entry_mode, kinds(other)) != \
+                    (cfg.coin, cfg.timeframe, cfg.entry_mode, kinds(cfg)):
                 continue
             for net in ("paper", "live"):
                 for t in read_trades(folder / f"trades-{net}.csv"):
@@ -387,15 +392,15 @@ class Controller:
             view = ladder_view(sizing or cfg, price, budget, step, lost, played, wins_left)
         view["recover_wins"] = cfg.recover_wins if cfg.sizing == "recover" else 1
         view["wins_left"] = (wins_left or view["recover_wins"]) if lost > 0 else 0
-        view["auto"] = None if not cfg.target_steps else {
-            "steps": cfg.target_steps, "base": base if sizing else None, "price": buy_cap(cfg),
+        view["auto"] = None if not cfg.survive_steps else {
+            "steps": cfg.survive_steps, "base": base if sizing else None, "price": buy_cap(cfg),
             "label": "Profit per win" if cfg.sizing == "recover" else "Starting bet"}
         return view
 
     def _budget(self, cfg: BotConfig) -> float:
         bal = (self.wallet() or 0.0) + (self.bot.bet["cost"] if self.bot.bet else 0.0)
-        if cfg.budget_usd > 0:
-            return max(0.0, min(bal, cfg.budget_usd + self.bot.ladder.pnl))
+        if cfg.budget > 0:
+            return max(0.0, min(bal, cfg.budget + self.bot.ladder.pnl))
         return bal
 
     # --- views -------------------------------------------------------------------------------------------
@@ -408,7 +413,7 @@ class Controller:
                "stop_after_win": b.stop_after_win and self.running, "step": b.ladder.step,
                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
-               "budget": self.cfg.budget_usd > 0}
+               "budget": self.cfg.budget > 0}
         if full:
             phase, message = self._phase()
             bal = self.balance()
@@ -446,6 +451,7 @@ class Controller:
             bet["win_profit"] = round(b.bet["shares"] - b.bet["cost"], 2)
         phase, message = self._phase()
         trades = read_trades(self.cfg.trade_log)
+        shown = self.with_volume(list(reversed(trades[-100:])))
         next_start = b.live.get("next_start") if self.running and not b.bet else None
         return {
             **self.summary(),
@@ -460,11 +466,13 @@ class Controller:
             "budget_left": round(b.budget_left(), 2) if bal is not None else None,
             "until_earn_left": round(b.until_earn_left(), 2),
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
+            "all_wins": (aw := sum(1 for t in trades if t.get("side") == t.get("result"))),
+            "all_losses": len(trades) - aw,                 # every bet in History, Resets or not
             "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",
             "ladder": self._ladder(self.cfg, plan_price(self.cfg), b.ladder.step, b.ladder.base),
-            "trades": list(reversed(trades[-100:])),
+            "trades": shown,
             # Resets and settings changes since the oldest bet shown (all of them while every bet is shown)
             "events": [e for e in read_events(self.folder, 300)
                        if len(trades) <= 100 or e.get("time", "") >= trades[-100]["time"]],
@@ -473,11 +481,21 @@ class Controller:
         }
 
 
+    def with_volume(self, trades: list[dict]) -> list[dict]:
+        """Each bet with its round's total traded volume ("volume", USDC) and the official TWAP Price To Beat and
+        final price it settled on ("twap_beat", "twap_end"); "" until known."""
+        slugs = {t["round"] for t in trades}
+        rv, rp = getattr(self.pm, "round_volumes", None), getattr(self.pm, "round_prices", None)
+        known = rv.get(slugs) if rv else {}
+        prices = rp.get(slugs) if rp else {}
+        return [{**t, "volume": known.get(t["round"], ""), "twap_beat": prices.get(t["round"], ["", ""])[0],
+                 "twap_end": prices.get(t["round"], ["", ""])[1]} for t in trades]
+
     def history(self) -> dict:
         """Every logged bet (newest first) and every event: the page's "Show all" and CSV download. status() sends
         only the newest 100 bets, every 2 s."""
         trades = read_trades(self.cfg.trade_log)
-        return {"trades": list(reversed(trades)), "events": read_events(self.folder), "trade_count": len(trades)}
+        return {"trades": self.with_volume(list(reversed(trades))), "events": read_events(self.folder), "trade_count": len(trades)}
 
 
 def streak_bets(trades: list[dict], step: int) -> list[dict]:
@@ -562,6 +580,39 @@ class App:
             self._write_order(known + new, pins)
         return known + new, pins
 
+    # --- setting presets: named settings to load into any bot or start a new one from ----------------------
+    def presets(self) -> dict:
+        try:
+            data = json.loads((self.profiles / PRESETS_FILE).read_text())
+            return {"presets": {str(k): {kk: vv for kk, vv in upgrade(v).items() if kk in FIELDS}   # old Bet modes too
+                                for k, v in sorted(data.items(), key=lambda kv: kv[0].lower()) if isinstance(v, dict)}}
+        except (OSError, ValueError, AttributeError):
+            return {"presets": {}}
+
+    def save_preset(self, body: dict) -> dict:
+        """{"name", "settings"}: save (or replace) a preset. The settings are checked like a bot's."""
+        name = str(body.get("name") or "").strip()[:40]
+        if not name:
+            raise ValueError("Give the preset a name")
+        values = {k: v for k, v in (body.get("settings") or {}).items() if k in FIELDS and k not in PRESET_SKIP}
+        cfg = BotConfig(self.profiles, **values)
+        cfg.validate()
+        data = self.presets()["presets"]
+        if name not in data and len(data) >= 100:
+            raise ValueError("Up to 100 presets: delete one first")
+        data[name] = {k: v for k, v in cfg.settings().items() if k not in PRESET_SKIP}
+        self.profiles.mkdir(parents=True, exist_ok=True)
+        write_json(self.profiles / PRESETS_FILE, data)
+        log.info("Saved setting preset %r%s", name, f" ({self.prefix.rstrip('/')})" if self.prefix else "")
+        return self.presets()
+
+    def delete_preset(self, body: dict) -> dict:
+        data = self.presets()["presets"]
+        if data.pop(str(body.get("name") or ""), None) is None:
+            raise LookupError("no such preset")
+        write_json(self.profiles / PRESETS_FILE, data)
+        return self.presets()
+
     def set_order(self, body: dict) -> dict:
         """{"order": [ids], "pinned": [ids]} from a drag and drop; unknown ids are dropped, missing ones kept."""
         with self._order_lock:
@@ -590,8 +641,14 @@ class App:
     def create(self, body: dict) -> dict:
         if self.max_bots and len(self.controllers) >= self.max_bots:
             raise ValueError(f"You can have up to {self.max_bots} bots. Delete one to make another.")
-        coin = str(body.get("coin") or "BTC").upper()
-        tf = str(body.get("timeframe") or "5m")
+        src = self.get(str(body["copy_from"])) if body.get("copy_from") else None    # duplicate one of your bots
+        preset = None
+        if body.get("preset"):                                                         # or start from a preset
+            preset = self.presets()["presets"].get(str(body["preset"]))
+            if preset is None:
+                raise LookupError("no such preset")
+        coin = str(body.get("coin") or (src.cfg.coin if src else (preset or {}).get("coin") or "BTC")).upper()
+        tf = str(body.get("timeframe") or (src.cfg.timeframe if src else (preset or {}).get("timeframe") or "5m"))
         if coin not in COINS or tf not in TIMEFRAMES:
             raise ValueError("Pick a coin and a round length")
         self.pm.series_id(coin, tf)          # refuse a coin without that timeframe
@@ -600,11 +657,21 @@ class App:
                              self.controllers)
         folder = self.profiles / bot_id
         folder.mkdir(parents=True)
-        cfg = BotConfig(folder, coin=coin, timeframe=tf, bot_name=name)
+        if src:          # its settings and Polymarket keys; a fresh ladder, paper account and history
+            cfg = BotConfig(folder, **{**src.cfg.settings(), "coin": coin, "timeframe": tf, "bot_name": name})
+            if (src.folder / ".env").exists():
+                shutil.copyfile(src.folder / ".env", folder / ".env")
+                (folder / ".env").chmod(0o600)
+        elif preset:
+            cfg = BotConfig(folder, **{**{k: v for k, v in preset.items() if k in FIELDS}, "coin": coin,
+                                       "timeframe": tf, "bot_name": name})
+        else:
+            cfg = BotConfig(folder, coin=coin, timeframe=tf, bot_name=name)
         write_json(folder / "config.json", cfg.settings())
         self.controllers[bot_id] = Controller(bot_id, folder, self.pm, self.prefix + bot_id)
         self.controllers[bot_id].name_for_blank = self.animal_name
-        log.info("New bot %s%s (%s %s)", self.prefix, bot_id, coin, tf)
+        log.info("New bot %s%s (%s %s)%s", self.prefix, bot_id, coin, tf,
+                 f", a copy of {self.prefix}{src.id}" if src else "")
         return {"id": bot_id, **self.list()}
 
     def delete(self, bot_id: str) -> dict:
@@ -684,6 +751,9 @@ def placed_in_round(t: dict) -> Optional[float]:
 
 
 ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and pins
+PRESETS_FILE = ".presets.json" # in a user's profiles/: {"name": {setting: value}}, the saved setting presets
+# a preset is the strategy: not a bot's name, live/paper or money (Budget, Paper balance), and keys never
+PRESET_SKIP = ("bot_name", "network", "budget_usd", "paper_balance_usd")
 
 BOT_PATH = re.compile(r"^/api/bots/([A-Za-z0-9_-]{1,30})/([a-z_]+)$")
 BOT_POST = {"start": Controller.start, "stop": Controller.stop, "reset": Controller.reset,
@@ -734,6 +804,8 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
                 return self._json(401, {"error": "Sign in first."})
             if path == "/api/bots":
                 return self._call(app.list)
+            if path == "/api/presets":
+                return self._call(app.presets)
             m = BOT_PATH.match(path)
             if m and m.group(2) == "status":
                 return self._call(lambda: app.get(m.group(1)).status())
@@ -758,6 +830,10 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
                 return self._call(app.create, body)
             if self.path == "/api/order":
                 return self._call(app.set_order, body)
+            if self.path == "/api/presets":
+                return self._call(app.save_preset, body)
+            if self.path == "/api/presets/delete":
+                return self._call(app.delete_preset, body)
             m = BOT_PATH.match(self.path)
             if not m:
                 return self._json(404, {"error": "not found"})

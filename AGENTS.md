@@ -58,6 +58,10 @@ The legacy `py-clob-client` is superseded: don't use it.
 - Rounds are **events** of that series, each with one market: outcomes `["Up","Down"]`, `clobTokenIds` in the same
   order, `eventStartTime`/`endDate`. Current rounds: `/events?series_id=…&end_date_min=<now>&closed=false&
   order=endDate&ascending=true` (**`closed=false` matters**: without it the query is slow and sometimes HTTP 500).
+- **Rounds settle on Chainlink's BTC/USD TWAP stream (60 s average), not the spot price** (checked 2026-11-16).
+  The resolved Gamma event has `eventMetadata: {priceToBeat, finalPrice}` (TWAP; absent while the round runs).
+  The live socket (crypto_prices_chainlink), polymarket.com/api/crypto/crypto-price and the bot's Price To Beat
+  are spot: in ~1 round in 10 spot start/end disagree with the result.
 - A round resolves from Chainlink (TWAP stream) 1-5 min after it ends (seen: 80 s, and 5 min on 2026-11-09 21:10 JST): `closed: true`, `outcomePrices`
   `["1","0"]` (Up) or `["0","1"]` (Down), `umaResolutionStatus: "resolved"`.
 - **Results come faster from the CLOB:** `clob.polymarket.com/markets/<conditionId>` shows `closed: true` and a
@@ -174,12 +178,24 @@ The legacy `py-clob-client` is superseded: don't use it.
   side mode. Backtests shown to the owner (7 days of BTC 5m, 1-minute prices): a side first at 0.70-0.80 won 76.9%
   vs ~76% needed (about break-even); a leader above 0.90 with ~2 min left is fairly priced; a leader at 0.60-0.70
   with ~2 min left won ~74% vs ~67% needed (small sample, untested on paper yet). Pay at most empty = no limit.
+- **Two Bet modes (2026-11-16, later the same day):** "make mode 2 types - "side" and "conditions". remove hit,
+  time, move." Old settings are converted by `config.upgrade()` to conditions that bet the same; keep it so old
+  files and presets load. Reverses the 2026-11-13 choice of separate modes and the "kept unchanged" below. In
+  conditions mode there is no Side mode (both sides pass = the leader) and no Pay at most (Price to is the order's
+  limit; empty Price from/to = no limit), all asked by the owner.
+- **Mixed mode (2026-11-16), next to the separate modes:** the owner asked for conditions instead of modes ("time
+  left 90s and move at least $10 and hit 0.75~0.95"), each AND or OR. Built as Bet mode `mixed` with the rule "a side
+  passes when every AND is true for it and at least one OR (if any)"; no brackets/nesting (offered, not needed).
+  side/hit/time/move were kept unchanged so live bots don't change behaviour; ask before removing them. Mixed's
+  simulation price gap is a guess until its own bets are measured.
 - **UI choices (2026-11-13):** no "At price" box on the ladder (it prices at the dearest the settings pay);
   Simulation panel after History, with a run-1 history table; Bet mode tile instead of Budget left; Stop menu
   "right away / after a win" like bcauto; bot list drag + pin like hyperliquid; round volume must be real time
   (Gamma's lags: use the CLOB WebSocket, `volume.py`).
 - **Versions:** the owner asked for 1.0.0 ("c and p with major update", 2026-11-13) and 1.1.0 ("c and p minor
-  update", same day), 1.2.0 ("c can p with minor update", 2026-11-14), 1.3.0 ("c and p with minor update", 2026-11-14).
+  update", same day), 1.2.0 ("c can p with minor update", 2026-11-14), 1.3.0 ("c and p with minor update", 2026-11-14), 1.4.0 ("commit and push minor update", 2026-11-16).
+- **"reset" never stops at step 1 (2026-11-14):** "don't stop as far as setting is 'reset'." At step 1 a bet the
+  bot can't pay is skipped and it waits for a round that fits (`Bot.waits_at_step1`); only stop mode halts.
 - **No fair coin, real prices (2026-11-14):** "i want everything with this have to be based on real history and
   reality." The simulation only replays past rounds, and adds the price gap measured on the owner's own bots'
   real bets (simulate.price_gap). Don't add made-up markets or optimistic fills back.

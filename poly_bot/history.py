@@ -127,8 +127,48 @@ class History:
 # Polymarket's live feed only reaches back a minute, so past paths come from Binance's <COIN>USDT candles (Chainlink,
 # which the rounds settle on, follows the big exchanges closely; the level can differ by a few dollars, the moves
 # hardly). 1-second candles for 5m and 15m rounds, 1-minute ones for longer. Per round: "o" = the price at its start,
-# "k" = [[seconds in, highest - o so far, lowest - o so far], ...] at each second that set a new high or low. Kept in data/history/<COIN>-<tf>-coin.json.
+# "k" = [[seconds in, highest - o so far, lowest - o so far], ...] at each second that set a new high or low (when a
+# move was first reached), "c" = the close - o of every candle in order, one per "s" seconds (a Move condition:
+# where the price is at any moment), "a" = the 60 s TWAP Polymarket settles on (prices.TWAP_FROM/TO) minus the TWAP
+# at the round's start, one per "s" seconds (a Move condition, like the bot; needs the minute before the round, so
+# each fetch starts PRE_SEC early). Rounds cached before "a" existed are fetched again. Kept in
+# data/history/<COIN>-<tf>-coin.json.
+PRE_SEC = 70
 BINANCE = "https://api.binance.com/api/v3/klines"
+
+
+def twap_path(candles: list, start: int, end: int, step: int) -> list:
+    """The TWAP's move from the round's start, one per `step` seconds: at each moment t the mean close over
+    [t - TWAP_FROM, t - TWAP_TO] (a second with no trade keeps the last close) minus that mean at the start."""
+    from .prices import TWAP_FROM, TWAP_TO
+    closes = {c[0]: c[4] for c in candles}
+    first = start - TWAP_FROM
+    filled, last = {}, None
+    for t in range(min(closes) if closes else first, end + 1):
+        last = closes.get(t, last)
+        if t >= first and last is not None:
+            filled[t] = last
+
+    keys = sorted(filled)
+    sums, counts, tot, n = {}, {}, 0.0, 0          # running sums: each window's mean in O(1)
+    for k in keys:
+        tot, n = tot + filled[k], n + 1
+        sums[k], counts[k] = tot, n
+
+    def upto(t):                                   # (sum, count) of the filled seconds <= t
+        t = min(t, keys[-1]) if keys else t
+        while keys and t >= keys[0] and t not in sums:
+            t -= 1
+        return (sums[t], counts[t]) if keys and t >= keys[0] else (0.0, 0)
+
+    def twap(t):
+        (s1, n1), (s0, n0) = upto(t - TWAP_TO), upto(t - TWAP_FROM - 1)
+        return (s1 - s0) / (n1 - n0) if n1 > n0 else None
+
+    base = twap(start)
+    if base is None:
+        return []
+    return [round((twap(start + i * step) or base) - base, 2) for i in range((end - start) // step)]
 
 
 class CoinPaths:
@@ -151,7 +191,7 @@ class CoinPaths:
                 except (OSError, ValueError, KeyError):
                     self._cache[key] = {}
             have = self._cache[key]
-            missing = [r for r in rounds if r["slug"] not in have]
+            missing = [r for r in rounds if "a" not in have.get(r["slug"], {})]
             job = self._jobs.get(key)
             running = job and job["thread"].is_alive()
             if missing and not running and not (job and job.get("failed_for") == len(missing)):
@@ -172,11 +212,12 @@ class CoinPaths:
         # one request covers 1000 candles: walk the rounds in time order, fetching each stretch once
         rounds = sorted(rounds, key=lambda r: r["start"])
         chunks, cur = [], None
+        pre = PRE_SEC if sec else 120                      # the minute before each round, for its TWAP start
         for r in rounds:
             if cur and r["end"] <= cur[0] + 1000 * step:
                 cur[1].append(r)
             else:
-                cur = [int(r["start"]), [r]]
+                cur = [int(r["start"]) - pre, [r]]
                 chunks.append(cur)
 
         def fetch(chunk):
@@ -187,7 +228,7 @@ class CoinPaths:
             except MarketError as e:
                 job["error"] = str(e)
                 k = []
-            candles = [(int(c[0]) // 1000, float(c[1]), float(c[2]), float(c[3])) for c in k]
+            candles = [(int(c[0]) // 1000, float(c[1]), float(c[2]), float(c[3]), float(c[4])) for c in k]
             out = {}
             for r in rs:
                 inside = [c for c in candles if r["start"] <= c[0] < r["end"]]
@@ -198,7 +239,13 @@ class CoinPaths:
                     if c[2] - o > hi or c[3] - o < lo:       # first reached at one of them
                         hi, lo = max(hi, c[2] - o), min(lo, c[3] - o)
                         k.append([c[0] - int(r["start"]), round(hi, 4), round(lo, 4)])
-                out[r["slug"]] = {"o": o, "k": k}
+                closes = {(c[0] - int(r["start"])) // step: c[4] for c in inside}
+                path, last = [], o                       # a second with no trade keeps the last close
+                for i in range(int(r["end"] - r["start"]) // step):
+                    last = closes.get(i, last)
+                    path.append(round(last - o, 2))
+                out[r["slug"]] = {"o": o, "k": k, "c": path, "s": step,
+                                  "a": twap_path(candles, int(r["start"]), int(r["end"]), step)}
             job["done"] += len(rs)
             return out
 

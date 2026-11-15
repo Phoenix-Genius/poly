@@ -144,24 +144,38 @@
   .card-ico { width: 22px; height: 22px; flex: none; display: grid; place-items: center; font-size: 13px; background: var(--panel);
               box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 35%, transparent); }
   .card-title { font-weight: 700; font-size: 13px; }
-  .card-body { padding: 8px 10px 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; }
+  .card-body { padding: 6px 8px 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px 8px; }
   .tone-money { --tone: #2563eb; } .tone-target { --tone: #db2777; } .tone-recover { --tone: #7c3aed; }
   .tone-dir { --tone: #0891b2; } .tone-adv { --tone: #64748b; }
   .dark .tone-money { --tone: #5b8def; } .dark .tone-target { --tone: #f472b6; } .dark .tone-recover { --tone: #a78bfa; }
   .dark .tone-dir { --tone: #22d3ee; } .dark .tone-adv { --tone: #94a3b8; }
-  .field { margin: 0; min-width: 0; }
-  .card-body .field.wide { grid-column: 1 / -1; }
-  .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 2px; cursor: help; }
-  .field input, .field select { width: 100%; padding: 4px 8px; font-size: 13px; border: 1px solid var(--line); background: var(--input); }
+  .field { margin: 0; min-width: 0; position: relative; }
+  /* label, box and note are rows shared across the card (subgrid): every box in a row lines up, whatever the label
+     length or a note under one of them */
+  .card-body > .field { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 2px; }
+  .card-body > .field > label { align-self: end; margin-bottom: 0; }
+  .card-body > .field > .rec { margin-top: 0; }
+  .card-body .field.wide { grid-column: span 2; }
+  .card-body.fit { grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); }   /* 4 or fewer settings shown: they fill the row */
+  .card-body .field[data-key="price_spread"] { grid-column: 1 / -1; }
+  .card-body .field[data-key="cond_time"], .card-body .field[data-key="cond_price"] { grid-column-start: 1; }   /* conditions: Time + Move on a row, Price on the next */
+  /* compact: 3+ settings a row; a long label wraps to a second line */
+  .field label { display: block; font-weight: 600; font-size: 12px; line-height: 1.25; margin-bottom: 2px; cursor: help; }
+  .field input, .field select { width: 100%; padding: 3px 6px; font-size: 13px; border: 1px solid var(--line); background: var(--input); }
   .field .help { font-size: 12px; color: var(--muted); margin-top: 3px; display: none; }
+  .card-body .field:focus-within .help { position: absolute; z-index: 5; left: 0; top: 100%; width: max(240px, 100%); padding: 6px 8px;
+                                         background: var(--panel); border: 1px solid var(--line); color: var(--text); }
+  .card-body .field.help-left:focus-within .help { left: auto; right: 0; }
   .rec-star { color: var(--amber); font-weight: 700; }
   .field .rec { font-size: 11px; color: var(--muted); margin-top: 2px; cursor: help; }
   .field:focus-within .help { display: block; }   /* compact: a field's help shows while you edit it */
-  .field.hide { display: none; }
+  .field.hide, .card.hide { display: none; }
   .savebar { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px;
              display: flex; gap: 8px; align-items: center; font-size: 13px; }
   .savebar .btn { flex: none; white-space: nowrap; }
   .savebar.dirty #saveMsg { color: var(--amber); font-weight: 600; }
+  .savebar #saveMsg { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .stopmenu[data-for="presets"] { max-width: min(420px, calc(100vw - 16px)); }
 
   /* page */
   .head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
@@ -204,11 +218,18 @@
   .side-up { color: var(--up); } .side-down { color: var(--down); }
   .chance { height: 8px; background: var(--down); margin-top: 8px; position: relative; }
   .stopmenu { position: fixed; z-index: 40; background: var(--panel); border: 1px solid var(--red); box-shadow: 0 6px 18px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+  .menu-sep { padding: 6px 12px 2px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-top: 1px solid var(--line); }
+  .menu-sep:first-child { border-top: 0; }
+  .stopmenu[data-for="presets"] { max-height: calc(100vh - 16px); overflow-y: auto; }
+  .preset-row { display: flex; } .preset-row > button:first-child { flex: 1; min-width: 0; }
+  .stopmenu .preset-del { flex: none; padding: 8px 10px; color: var(--muted); }
+  .stopmenu .preset-del:hover { color: var(--red); }
   .stopmenu button { text-align: left; padding: 8px 12px; border: 0; background: none; cursor: pointer; font-weight: 600; }
   .stopmenu button small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
   .stopmenu button:hover, .stopmenu button:focus-visible { background: var(--red-bg); outline: none; }
-  .winnow { display: flex; gap: 16px; align-items: center; margin-top: 10px; padding: 8px 12px; border-left: 4px solid var(--muted); background: var(--panel); }
-  .winnow.ahead { border-color: var(--green); background: var(--green-bg); } .winnow.behind { border-color: var(--red); background: var(--red-bg); }
+  .winnow { display: flex; gap: 16px; align-items: center; margin-top: 10px; }
+  .winnow .wn { padding: 8px 12px; border-left: 4px solid var(--muted); background: var(--panel); }   /* only this box is coloured */
+  .winnow.ahead .wn { border-color: var(--green); background: var(--green-bg); } .winnow.behind .wn { border-color: var(--red); background: var(--red-bg); }
   .winnow .k { font-size: 12px; color: var(--muted); }
   .winnow .big { font-size: 30px; font-weight: 800; line-height: 1.1; }
   .winnow.ahead .big { color: var(--green); } .winnow.behind .big { color: var(--red); }
@@ -221,6 +242,8 @@
   .simstats > div { background: var(--panel); padding: 8px 10px; }
   .simstats .label { font-size: 12px; color: var(--muted); } .simstats .value { font-size: 18px; font-weight: 700; }
   .simstats .sub { font-size: 11px; color: var(--muted); }
+  .simstats > div.hl { background: var(--red-bg); border-left: 3px solid var(--red); }   /* ladder ends: what a martingale really costs */
+  .simstats > div.hl .value { color: var(--red); font-size: 22px; }
   .simcharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
   .simchart { background: var(--panel); padding: 8px 10px; } .simchart h3 { margin: 0; font-size: 13px; }
   .simchart svg { width: 100%; height: auto; display: block; font-size: 11px; }
@@ -289,7 +312,8 @@
       <div id="summary" class="summary-box"></div>
     </div>
     <div id="form"></div>
-    <div class="savebar" id="saveBar"><span id="saveMsg" class="muted">All changes saved</span><span class="spacer"></span>
+    <div class="savebar" id="saveBar"><span id="saveMsg" class="muted">✓ Saved</span><span class="spacer"></span>
+      <button class="btn" id="presetsBtn" aria-haspopup="menu" title="Save these settings under a name, or load saved ones">📚 Presets ▾</button>
       <button class="btn" id="discard" disabled>Discard</button><button class="btn primary" id="save" disabled>Save settings</button></div>
   </aside>
 
@@ -301,6 +325,8 @@
 <dialog id="newDlg">
   <form method="dialog" id="newForm">
     <h3 style="margin-top:0">New bot</h3>
+    <div class="field"><label>Copy from</label><select name="copy_from"></select>
+      <div class="muted" style="font-size:12px;margin-top:4px">A bot: its settings and Polymarket keys (no need to enter them again). A preset: its settings, as a paper bot. Either way a fresh ladder and an empty history.</div></div>
     <div class="field"><label>Coin</label><select name="coin"></select></div>
     <div class="field"><label>Round length</label><select name="timeframe"></select></div>
     <div class="field"><label>Name (optional)</label><input name="name" maxlength="40" placeholder="empty = random animal"></div>
@@ -501,40 +527,110 @@ function select(id) {
   if (formDirty && id !== current && !confirm("Discard unsaved settings?")) return;
   current = id; localStorage.setItem("bot", id); formDirty = false; status = null; histAll = false;
   if (id && location.hash !== "#bot=" + id) history.replaceState(null, "", "#bot=" + id);
-  renderBots(); buildForm(); refresh();
+  renderBots(); buildForm(); refresh(); loadPresets();
 }
 
 // --- new bot ---
-$("#newBot").onclick = () => {
+// --- setting presets: named settings (no name, live/paper, money or keys) to load into a bot or start one from ---
+let presets = {};
+async function loadPresets() { try { presets = (await api("/api/presets")).presets || {}; } catch (e) { presets = {}; } }
+const PRESET_SKIP = ["bot_name", "network", "budget_usd", "paper_balance_usd"];
+function presetSummary(p) {
+  const m = p.entry_mode === "conditions" ? condText(p) : `side ${p.side_mode}`;
+  return `${p.coin} ${p.timeframe} · ${m} · ${p.sizing === "recover" ? `$${p.base_profit_usd}/win` : `×${p.multiplier}`}` +
+    (+p.max_steps ? ` · ${p.max_steps} losses` : "");
+}
+function presetMenu(btn) {
+  if ($("#stopMenu")?.dataset.for === "presets") return closeStopMenu();
+  closeStopMenu();
+  const m = document.createElement("div");
+  m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = "presets"; m.setAttribute("role", "menu");
+  m.style.borderColor = "var(--accent)";
+  const names = Object.keys(presets);
+  m.innerHTML = `<div class="menu-sep">Presets</div><button type="button" role="menuitem" data-p="save">💾 Save these settings as a preset…<small>The form as it is now (saved or not); not the name, live/paper, Budget, Paper balance or keys</small></button>` +
+    (names.length ? names.map(n => `<div class="preset-row"><button type="button" role="menuitem" data-p="load" data-name="${esc(n)}">📄 ${esc(n)}<small>${esc(presetSummary(presets[n]))}</small></button><button type="button" class="preset-del" data-p="del" data-name="${esc(n)}" title="Delete this preset">✕</button></div>`).join("")
+      : `<div class="muted" style="padding:8px 12px;font-size:12px">No presets saved yet: use 💾 above.</div>`) +
+    (bots.some(b => b.id !== current) ? `<div class="menu-sep">Load settings from a bot</div>` +
+      bots.filter(b => b.id !== current).map(b => `<button type="button" role="menuitem" data-p="bot" data-id="${esc(b.id)}">🤖 ${esc(b.name)}<small>${esc(b.coin)} ${esc(b.timeframe)} · ${b.network === "live" ? "LIVE" : "paper"}</small></button>`).join("") : "");
+  document.body.append(m);
+  const r = btn.getBoundingClientRect();
+  m.style.minWidth = Math.max(r.width, 300) + "px";
+  m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + "px";
+  m.style.top = Math.max(8, r.top - 2 - m.offsetHeight) + "px";
+  m.onclick = async e => {
+    const b = e.target.closest("[data-p]"); if (!b) return;
+    const name = b.dataset.name;
+    closeStopMenu();
+    try {
+      if (b.dataset.p === "save") {
+        const n = (prompt("Preset name (an existing name replaces that preset):", "") || "").trim();
+        if (!n) return;
+        if (presets[n] && !confirm(`Replace the preset "${n}"?`)) return;
+        presets = (await api("/api/presets", {name: n, settings: formValues()})).presets;
+        toastOk(`Preset "${n}" saved`);
+      } else if (b.dataset.p === "load") {
+        const p = Object.fromEntries(Object.entries(presets[name]).filter(([k]) => !PRESET_SKIP.includes(k)));
+        fillForm(p); setDirty(true); schedulePreview();
+        toast(`Loaded "${name}" into the form: check it, then press Save settings`);
+      } else if (b.dataset.p === "bot") {              // another bot's strategy (not its name, live/paper, money or keys)
+        const st = await api(`/api/bots/${b.dataset.id}/status`);
+        const p = Object.fromEntries(Object.entries(st.settings).filter(([k]) => !PRESET_SKIP.includes(k)));
+        fillForm(p); setDirty(true); schedulePreview();
+        toast(`Loaded ${st.name}'s settings into the form: check them, then press Save settings`);
+      } else if (b.dataset.p === "del") {
+        if (!confirm(`Delete the preset "${name}"?`)) return;
+        presets = (await api("/api/presets/delete", {name})).presets;
+      }
+    } catch (err) { toast(err.message); }
+  };
+}
+$("#presetsBtn").onclick = e => presetMenu(e.currentTarget);
+loadPresets();
+
+async function newBotDlg(from = "") {
+  await loadPresets();                      // the latest presets (saved in another tab too)
   const f = $("#newForm");
   f.coin.innerHTML = schema.coins.map(c => `<option>${c}</option>`).join("");
   f.timeframe.innerHTML = schema.timeframes.map(t => `<option>${t}</option>`).join("");
+  f.copy_from.innerHTML = '<option value="">— nothing: default settings —</option>' +
+    (bots.length ? `<optgroup label="A bot (settings and keys)">${bots.map(b => `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.coin)} ${esc(b.timeframe)} · ${b.network === "live" ? "LIVE" : "paper"}</option>`).join("")}</optgroup>` : "") +
+    `<optgroup label="A preset (settings only, paper)">${Object.keys(presets).length ? Object.keys(presets).map(n => `<option value="preset:${esc(n)}">📄 ${esc(n)}</option>`).join("")
+      : '<option disabled>none saved yet: open a bot, set it up, then 📚 Presets → 💾 Save these settings as a preset</option>'}</optgroup>`;
+  f.copy_from.value = from;
+  f.copy_from.onchange = () => {            // a copy starts on the same coin and round length (you can change them)
+    const v = f.copy_from.value, b = bots.find(x => x.id === v), p = v.startsWith("preset:") ? presets[v.slice(7)] : null;
+    if (b || p) { f.coin.value = (b || p).coin; f.timeframe.value = (b || p).timeframe; }
+  };
+  f.copy_from.onchange();
   f.name.value = "";
   $("#newDlg").showModal();
-};
+}
+$("#newBot").onclick = () => newBotDlg();
 $("#newDlg").addEventListener("close", async () => {
   if ($("#newDlg").returnValue !== "ok") return;
   const f = $("#newForm");
   try {
-    const d = await api("/api/bots", {coin: f.coin.value, timeframe: f.timeframe.value, name: f.name.value});
+    const v = f.copy_from.value, preset = v.startsWith("preset:") ? v.slice(7) : "";
+    const d = await api("/api/bots", {coin: f.coin.value, timeframe: f.timeframe.value, name: f.name.value, copy_from: preset ? "" : v, preset});
     bots = d.bots; formDirty = false; select(d.id);
   } catch (e) { toast(e.message); }
 });
 
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
 const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply"};
-const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "hit_max_price", "time_min_price"];   // shown empty when 0
+const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "cond_price_min", "cond_price_max"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
-  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "hit_price", "time_left_sec", "time_min_price", "move_usd", "hit_max_price", "side_mode", "first_side"]},
+  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "side_mode", "first_side",
+    "cond_time", "cond_time_sec", "cond_move", "cond_move_usd", "cond_price", "cond_price_min", "cond_price_max"]},   // conditions: one row per condition
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec"]},
 ];
-const WIDE = ["bot_name"];
+const WIDE = [];             // settings that take 2 columns (none: Market & money fits 3 a row in 2 rows)
 const PLACEHOLDER = {bot_name: "empty = random animal", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
-  entry_window_sec: "auto", hit_max_price: "no limit", time_min_price: "any lead"};
+  entry_window_sec: "auto", cond_price_min: "0.50", cond_price_max: "0.95"};
 const SPREAD_HELP = "Slide to set Min and Max price around 0.50 in one go: ±5¢ = 0.45–0.55, ±10¢ = 0.40–0.60. " +
   "You can still set Min and Max one by one; the slider then says custom.";
 // the Price ± box: fills Min/Max price, and shows their spread when they're even around 0.50
@@ -575,6 +671,11 @@ function buildForm() {
     return `<div class="card tone-${g.tone}"><div class="card-head"><span class="card-ico">${g.icon}</span><span class="card-title">${g.title}</span></div>
       <div class="card-body">${keys.map(k => fieldHtml(byKey[k])).join("")}</div></div>`;
   }).join("");
+  form.addEventListener("focusin", e => {   // the floating help opens leftwards near the card's right edge
+    const fld = e.target.closest(".card-body .field"); if (!fld) return;
+    const box = fld.closest(".card-body").getBoundingClientRect(), r = fld.getBoundingClientRect();
+    fld.classList.toggle("help-left", r.left + 240 > box.right);
+  });
   for (const el of form.querySelectorAll("input,select")) el.addEventListener("input", () => {
     if (el.id === "spread") pricesFromSpread(); else if (el.name === "min_price" || el.name === "max_price") spreadFromPrices();
     setDirty(true); showFields(); schedulePreview();
@@ -584,7 +685,7 @@ function buildForm() {
 function setDirty(d) {
   formDirty = d;
   $("#saveBar").classList.toggle("dirty", d);
-  $("#saveMsg").textContent = d ? "Unsaved changes" : "All changes saved";
+  $("#saveMsg").textContent = d ? "Unsaved" : "✓ Saved";
   $("#save").disabled = $("#discard").disabled = !d;
 }
 function fillForm(settings) {
@@ -604,9 +705,9 @@ function formValues() {
 // settings with a recommended value (from the real-history tests, 2026-11-14), shown under the box with a *
 const RECOMMEND = {
   recover_wins: v => {
-    const cap = +v.hit_max_price, cheap = v.entry_mode !== "side" && cap > 0 && cap <= 0.85;
-    return cheap ? ["1–2", "with Pay at most ≤ 0.85 losses are small: 1–2 were the steadiest"]
-                 : ["3 or more", "without a low Pay at most a loss is big (bets up to 0.99): spreading it over 3+ wins kept more runs alive"];
+    const cap = v.cond_price !== "off" ? +v.cond_price_max : 0, cheap = v.entry_mode !== "side" && cap > 0 && cap <= 0.85;
+    return cheap ? ["1–2", "with Price to ≤ 0.85 losses are small: 1–2 were the steadiest"]
+                 : ["3 or more", "without a low Price to a loss is big (bets up to 0.99): spreading it over 3+ wins kept more runs alive"];
   },
 };
 function showRecs(v) {
@@ -618,23 +719,38 @@ function showRecs(v) {
     el.title = why;
   }
 }
+// the Budget in effect: live bots only (a paper bot's Paper balance is its budget)
+const budgetOf = s => s.network === "live" ? +s.settings.budget_usd || 0 : 0;
 function showFields() {
   const v = formValues();
   showRecs(v);
-  const auto = +v.target_steps > 0;   // Steps to survive works out the first bet: its box isn't used then
+  const auto = v.entry_mode === "side" && +v.target_steps > 0;   // Steps to survive (side mode only) works out the first bet: its box isn't used then
+  $('.field[data-key="target_steps"]')?.classList.toggle("hide", v.entry_mode !== "side");
   for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier" && k !== "recover_wins"));
-  // each Bet mode shows only its own fields: side = Side mode + Min/Max price + Entry window, hit = Hit price,
-  // time = Time left + Leader at least; Pay at most is shared by hit and time
-  const m = v.entry_mode, side = m === "side";
+  // each Bet mode shows only its own fields: side = Side mode + Min/Max price + Entry window, conditions = the
+  // Time left / Move / Price rows
+  const m = v.entry_mode, side = m === "side", conds = m === "conditions";
   $('.field[data-key="first_side"]')?.classList.toggle("hide", !side || !SIDE_FIRST.includes(v.side_mode));
-  for (const k of ["side_mode", "min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
-  $('.field[data-key="hit_price"]')?.classList.toggle("hide", m !== "hit");
-  for (const k of ["time_left_sec", "time_min_price"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", m !== "time");
-  $('.field[data-key="move_usd"]')?.classList.toggle("hide", m !== "move");
-  $('.field[data-key="hit_max_price"]')?.classList.toggle("hide", side);
-  $('.field[data-key="entry_window_sec"]')?.classList.toggle("hide", m === "time");
+  $('.field[data-key="side_mode"]')?.classList.toggle("hide", !side);   // conditions: they pick, else the leader
+  for (const k of ["min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
+  // conditions: each condition's AND/OR box, and its values only while it's on
+  for (const [c, keys] of [["time", ["cond_time_sec"]], ["move", ["cond_move_usd"]], ["price", ["cond_price_min", "cond_price_max"]]]) {
+    $(`.field[data-key="cond_${c}"]`)?.classList.toggle("hide", !conds);
+    for (const k of keys) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !conds || v[`cond_${c}`] === "off");
+  }
+  $('.field[data-key="entry_window_sec"]')?.classList.toggle("hide", conds);
   $('.field[data-key="paper_balance_usd"]')?.classList.toggle("hide", v.network === "live");
+  $('.field[data-key="budget_usd"]')?.classList.toggle("hide", v.network !== "live");   // paper: the Paper balance is the budget
   renderSettingsHead(v);
+  for (const body of document.querySelectorAll("#form .card-body")) {   // each card's shown settings fill its rows
+    const shown = [...body.querySelectorAll(":scope > .field:not(.hide)")].filter(f => f.dataset.key !== "price_spread");
+    const width = shown.reduce((w, f) => w + (f.classList.contains("wide") ? 2 : 1), 0);
+    body.classList.toggle("fit", width > 0);
+    body.closest(".card").classList.toggle("hide", width === 0);   // a card with nothing to show
+    // up to 4: one row (a lone setting half the width); more: 2 even rows (Market & money: 3 + 3)
+    const condRows = shown.some(f => f.dataset.key.startsWith("cond_"));   // conditions: 4 columns, a condition per row
+    body.style.setProperty("--cols", condRows ? 4 : width <= 4 ? Math.max(2, width) : Math.ceil(width / 2));
+  }
 }
 // the settings at a glance: what the form says now (unsaved edits included); click a chip to edit that setting
 function renderSettingsHead(v) {
@@ -645,28 +761,25 @@ function renderSettingsHead(v) {
   const chip = (icon, k, val, edit, extra = "", cls = "") => `<span class="chip ${cls}" data-edit="${edit}" title="Change"><span aria-hidden="true">${icon}</span><span class="k">${k}</span><b>${val}</b>${extra ? `<span class="k">${extra}</span>` : ""}</span>`;
   $("#setIdChips").innerHTML = `<span class="chip ${v.network === "live" ? "live" : "paper"}" data-edit="network" title="Change">${v.network === "live" ? "💵 LIVE" : "📝 paper"}</span>` +
     `<span class="chip market" data-edit="coin" title="Change"><b>${esc(v.coin)} · ${esc(v.timeframe)}</b></span>`;
-  const auto = n(v.target_steps) > 0;
+  const auto = v.entry_mode === "side" && n(v.target_steps) > 0;
   const bet = v.sizing === "recover"
     ? chip("🎯", "Profit/win", auto ? "auto" : money(n(v.base_profit_usd)), auto ? "target_steps" : "base_profit_usd")
     : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
-    up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
-  const hit = v.entry_mode === "hit", time = v.entry_mode === "time", move = v.entry_mode === "move";
-  const left = n(v.time_left_sec), leftTxt = left % 60 ? `${left} s` : `${left / 60} min`;
-  const cap = n(v.hit_max_price) > 0 ? `max ${n(v.hit_max_price).toFixed(2)}` : "no limit";
-  const win = time ? `${leftTxt} left` : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : hit || move ? "whole round" : "auto";
+    leader: "leader", up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
+  const conds = v.entry_mode === "conditions";
+  const win = conds ? (v.cond_time === "and" ? `≤ ${n(v.cond_time_sec)} s left` : "whole round") : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
   $("#summary").innerHTML = `<div class="chips pairs">` + [
-    chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd"),
+    v.network === "live" ? chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd")
+      : chip("🧾", "Paper balance", money(n(v.paper_balance_usd)), "paper_balance_usd"),
     chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
     bet,
     chip("📐", "Sizing", v.sizing === "recover" ? (n(v.recover_wins) > 1 ? `recover · ${n(v.recover_wins)} wins` : "recover") : `×${esc(v.multiplier)}`, "sizing"),
-    chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps"),
+    v.entry_mode === "side" ? chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps") : "",
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
-    hit ? chip("💲", "Hit", `${n(v.hit_price).toFixed(2)} · ${cap}`, "hit_price")
-      : move ? chip("💲", "Move", `$${n(v.move_usd).toLocaleString()} · ${cap}`, "move_usd")
-      : time ? chip("💲", "Leader", `${n(v.time_min_price) > 0 ? n(v.time_min_price).toFixed(2) + "+" : "any"} · ${cap}`, "time_min_price")
+    conds ? chip("🧩", "Conditions", esc(condText(v)) + (v.cond_price === "off" ? " · no limit" : ""), "cond_time")
       : chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
-    hit ? chip("🔁", "Side", "first to hit", "entry_mode") : time ? chip("🔁", "Side", "leader", "entry_mode") : move ? chip("🔁", "Side", "the way it moved", "entry_mode") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
+    conds ? chip("🔁", "Side", "by the conditions, else the leader", "cond_move") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
     chip("⏱️", "Entry", win, "entry_window_sec"),
   ].join("") + `</div>`;
 }
@@ -707,16 +820,21 @@ function schedulePreview() {
 function panel(id, title, sum, body) {
   return `<section class="panel ${folded.has(id) ? "folded" : ""}" id="${id}"><h2 data-fold="${id}">${title} <span class="sum">${sum}</span></h2><div class="body">${body}</div></section>`;
 }
-// the Bet mode tile: which mode and its main setting, e.g. "Hit 0.75", "Time · 2 min left", "Side · random"
+// conditions mode in words, e.g. "≤90s left AND move $10+ AND 0.75–0.95" (ORs in brackets after the ANDs)
+function priceRange(lo, hi) {   // empty Price from = 0.50 (the favourite), empty Price to = 0.95
+  return `${(lo > 0 ? lo : 0.5).toFixed(2)}–${(hi > 0 ? hi : 0.95).toFixed(2)}`;
+}
+function condText(v) {
+  const what = {time: `≤${+v.cond_time_sec}s left`, move: `move $${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
+  const on = ["time", "move", "price"].filter(c => v[`cond_${c}`] && v[`cond_${c}`] !== "off");
+  const ands = on.filter(c => v[`cond_${c}`] === "and").map(c => what[c]), ors = on.filter(c => v[`cond_${c}`] === "or").map(c => what[c]);
+  const or = ors.join(" OR ");
+  return ands.join(" AND ") + (ors.length ? (ands.length ? " AND " + (ors.length > 1 ? `(${or})` : or) : or) : "") || "no condition";
+}
+// the Bet mode tile: which mode and its main setting, e.g. "Conditions ≤90s left AND 0.75–0.95", "Side · random"
 function modeTile(v) {
-  const m = v.entry_mode, cap = +v.hit_max_price > 0 ? ` · max ${(+v.hit_max_price).toFixed(2)}` : "";
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
-  if (m === "hit") return `Hit ${(+v.hit_price).toFixed(2)} ${small("first side to reach it" + cap)}`;
-  if (m === "move") return `Move $${(+v.move_usd).toLocaleString()} ${small("from the Price To Beat, the way it moved" + cap)}`;
-  if (m === "time") {
-    const l = +v.time_left_sec, left = l % 60 ? `${l} s` : `${l / 60} min`;
-    return `Time · ${left} ${small("left, the leader" + (+v.time_min_price > 0 ? ` at ${(+v.time_min_price).toFixed(2)}+` : "") + cap)}`;
-  }
+  if (v.entry_mode === "conditions") return `Conditions ${small(esc(condText(v)))}`;
   return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · ${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`)}`;
 }
 function render() {
@@ -740,17 +858,18 @@ function render() {
         ${running ? `<button class="btn stop" data-act="stopmenu" aria-haspopup="menu">■ ${s.stop_after_win ? "Stop after win…" : "Stop"} ▾</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
         <button class="btn" data-act="resetmenu" aria-haspopup="menu" ${running ? "disabled" : ""} title="Reset, or reset only the ladder">↺ Reset ▾</button>
         ${s.network === "live" ? "" : `<button class="btn" data-act="paper_reset" ${running ? "disabled" : ""} title="Fresh paper account with the Paper balance">🧾 Reset paper</button>`}
+        <button class="btn" data-act="duplicate" title="New bot with this bot's settings and Polymarket keys">⧉ Duplicate</button>
         <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>
       </div>
       <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the next win</b>' : ""}</div>
     </div>
     <div class="tiles">
-      <div class="tile" style="--tone:var(--accent)"><div class="k" title="${s.settings.budget_usd > 0 ? "This bot's own money: Budget + profit since Reset - the open bet" : "The whole account"}">💰 ${s.settings.budget_usd > 0 ? "Budget balance" : s.network === "live" ? "pUSD balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${s.settings.budget_usd > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
-      ${s.settings.budget_usd > 0 ? `<div class="tile" style="--tone:var(--muted)"><div class="k" title="The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}
+      <div class="tile" style="--tone:var(--accent)"><div class="k" title="${budgetOf(s) > 0 ? "This bot's own money: Budget + profit since Reset, with the open bet at what it's worth now" : "The account's cash plus this bot's open bet at what it's worth now"}">💰 ${budgetOf(s) > 0 ? "Budget balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${!(budgetOf(s) > 0) && s.bet && s.wallet != null ? `<div class="muted" style="font-size:11px">cash ${money(s.wallet)} · in bet ${money(s.balance - s.wallet)}</div>` : ""}${budgetOf(s) > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
+      ${budgetOf(s) > 0 ? `<div class="tile" style="--tone:var(--muted)"><div class="k" title="The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
-      <div class="tile"><div class="k">✅ Wins / ❌ Losses</div><div class="v num">${s.wins} / ${s.losses}</div></div>
+      <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}</div>
       <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div></div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
@@ -762,7 +881,8 @@ function render() {
     ${panel("logPanel", "Log", "", `<pre id="log" data-no-i18n>${esc(s.log.join("\n"))}</pre>`)}
   `;
   for (const b of page.querySelectorAll("[data-act]")) b.onclick = () => b.dataset.act === "stopmenu"
-    ? stopMenu(b, current, status.stop_after_win) : b.dataset.act === "resetmenu" ? resetMenu(b) : doAct(b.dataset.act);
+    ? stopMenu(b, current, status.stop_after_win) : b.dataset.act === "resetmenu" ? resetMenu(b)
+    : b.dataset.act === "duplicate" ? newBotDlg(current) : doAct(b.dataset.act);
   for (const h of page.querySelectorAll("[data-fold]")) h.onclick = () => {
     const id = h.dataset.fold; folded.has(id) ? folded.delete(id) : folded.add(id);
     localStorage.setItem("folded", JSON.stringify([...folded])); h.parentElement.classList.toggle("folded");
@@ -811,11 +931,11 @@ function toastOk(msg) { const t = $("#toast"); t.style.background = "var(--green
 function winNow(side, mine, upChance) {
   const p = Math.round(mine * 100), c = p > 50 ? "ahead" : p < 50 ? "behind" : "even";
   const one = (sd, v) => `<span class="${sd === side ? "mine side-" + sd : "muted"}">${sd === "up" ? "📈 Up" : "📉 Down"} ${Math.round(v * 100)}%</span>`;
-  return `<div class="winnow ${c}"><div><div class="k">Win chance now (${side === "up" ? "Up" : "Down"})</div>
+  return `<div class="winnow ${c}"><div class="wn"><div class="k">Win chance now (${side === "up" ? "Up" : "Down"})</div>
       <div class="big num">${p}%</div></div>
     <div class="both">${one("up", upChance)} · ${one("down", 1 - upChance)}<div class="chance"><b style="width:${(upChance * 100).toFixed(1)}%"></b></div></div></div>`;
 }
-// move mode: the coin's live price against the round's Price To Beat (like the round's page on Polymarket)
+// a Move condition: the coin's live price against the round's Price To Beat (like the round's page on Polymarket)
 function coinVsBeat(coin, now, beat) {
   const d = now - beat, c = d >= 0 ? "pos" : "neg";
   return `<div class="bet" style="margin-top:8px"><div><div class="k">Price To Beat</div><div class="v num">${moneyFull(beat)}</div></div>
@@ -887,7 +1007,7 @@ async function runSim() {
 function simHtml(r) {
   const f = r.first_bet, pace = r.pace_per_day;
   const days = pace ? ` · about ${Math.max(1, Math.round(r.bets / pace))} days at this bot's pace (${pace.toFixed(0)} bets/day)` : "";
-  const tile = (label, value, sub, c = "") => `<div><div class="label">${label}</div><div class="value num ${c}">${value}</div><div class="sub">${sub}</div></div>`;
+  const tile = (label, value, sub, c = "", box = "") => `<div class="${box}"><div class="label">${label}</div><div class="value num ${c}">${value}</div><div class="sub">${sub}</div></div>`;
   const edge = r.p_win - r.break_even, h = r.history;
   const day = ts => new Date(ts * 1000).toLocaleDateString([], {month: "short", day: "numeric"});
   const basis = r.mode === "real" && h
@@ -908,7 +1028,7 @@ function simHtml(r) {
       ${tile("Bad case (worst 5%)", sgnMoney(r.p5), `1 run in 20 ended here or lower · worst ${sgnMoney(r.worst)}`, tone(r.p5))}
       ${tile("Good case (best 5%)", sgnMoney(r.p95), `1 run in 20 ended here or higher · best ${sgnMoney(r.best)}`, tone(r.p95))}
       ${tile("Runs ending in profit", pctTxt(r.profit_chance), "the rest ended at a loss")}
-      ${tile("Runs with a ladder end", pctTxt(r.ladder_end_chance), `${r.ladder_ends_avg.toFixed(1)} ladder ends per run on average`)}
+      ${tile("🪜 Ladder ends per run", `${r.ladder_ends_avg.toFixed(1)}`, `typical run ${r.ladder_ends_median ?? "–"} · worst run ${r.ladder_ends_max ?? "–"} · run 1: ${r.ladder_ends_run1 ?? "–"} · ${pctTxt(r.ladder_end_chance)} of runs had one`, "", r.ladder_ends_avg > 0 ? "hl" : "")}
       ${tile("Runs that used up the budget", pctTxt(r.broke_chance), "step 1 no longer fit, the run stopped")}
       ${tile("Longest losing streak (typical run)", `${r.longest_streak_median} in a row`, `half the runs had a longer one · run 1 (the table below): ${r.longest_streak_run1 ?? "–"} · worst run: ${r.longest_streak_max} · biggest drop ${money(-r.drawdown_median)}`)}
     </div>
@@ -948,7 +1068,7 @@ function simLogHtml(r) {
       <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td><td class="num">${money(t.payout)}</td>
       <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`;
   }).join("");
-  return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b> <span class="muted">${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets</span></summary>
+  return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b> <span class="muted">${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets</span>${r.ladder_ends_run1 ? ` · <b class="neg">🪜 ${r.ladder_ends_run1} ladder end${r.ladder_ends_run1 > 1 ? "s" : ""}</b> <span class="muted">(red rows)</span>` : ""}</summary>
     <div class="simhelp">Run 1 as the simulation played it, laid out like the bot's History (newest first). Best = the replay's price; Price = what the bot really pays (with the price gap, shown as Slippage). Paid out = about 3 minutes after the round, when the result comes.</div>
     <div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
       <th title="The replay's price">Best</th><th title="Price paid, with the price gap">Price</th><th>Shares</th><th>Cost</th>
@@ -1064,6 +1184,12 @@ document.addEventListener("click", async e => {
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   } catch (err) { toast(err.message); }
 });
+// History: the coin's price minus the round's Price To Beat, green when it is on the bet's side
+function moveTd(t, price, beat) {
+  if (!+beat || !+price) return '<td class="num"><span class="muted">–</span></td>';
+  const d = +price - +beat, good = t.side === "up" ? d >= 0 : d < 0;
+  return `<td class="num ${good ? "pos" : "neg"}" title="${esc((+price).toFixed(2))} vs ${esc((+beat).toFixed(2))}">${d >= 0 ? "+" : "−"}$${Math.abs(d).toFixed(2)}</td>`;
+}
 function historyTable(trades, events = [], total = trades.length) {
   if (!trades.length && !events.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
   // newest first; in the same second an event (e.g. "Ladder ended" after the loss that ended it) is the newer one
@@ -1076,12 +1202,14 @@ function historyTable(trades, events = [], total = trades.length) {
     return (c / +t.cost * 100).toFixed(1) + "%";
   };
   let n = total;                         // bets numbered from the oldest (#1); log rows get no number
-  return `<div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
+  return `<div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th title="Everything traded in the round (USDC), from Polymarket once the round is over">Volume</th><th class="l">Bet</th>
+      <th title="Where the coin was when the bet was bought, against the round's real Price To Beat (Polymarket's official 60-second TWAP once published). Green = the bet's side">Move at bet</th>
+      <th title="How the round ended, on the prices Polymarket settled it on (Chainlink's 60-second TWAP): final price minus the official Price To Beat. Green = the bet's way. A dash until Polymarket publishes them">Move at end</th><th>Step</th>
       <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
       <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
-    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="15">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a></td>
-      <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td>
+    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="18">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : "↺"} ${esc(t.text)}</td></tr>` : `<tr><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a></td>
+      <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td><td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}<td class="num">${esc(t.step)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
       <td class="l">${t.side === t.result ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
@@ -1119,7 +1247,7 @@ function resetMenu(btn) {
   const m = document.createElement("div");
   m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = "reset"; m.setAttribute("role", "menu");
   m.style.borderColor = "var(--accent)";
-  const items = [["reset", "↺ Reset", "Fresh ladder at step 1; Profit since Reset and Wins / Losses back to 0"],
+  const items = [["reset", "↺ Reset", "Fresh ladder at step 1; Profit since Reset and Wins / Losses since Reset back to 0"],
     ["reset_ladder", "🪜 Reset only ladder", "Back to step 1; Profit since Reset and Wins / Losses stay"]];
   m.innerHTML = items.map(([a, t, h]) => `<button type="button" role="menuitem" data-a="${a}" title="${esc(h)}">${t}<small>${esc(h)}</small></button>`).join("");
   document.body.append(m);
@@ -1129,14 +1257,14 @@ function resetMenu(btn) {
   m.style.top = (r.bottom + 2 + m.offsetHeight < innerHeight ? r.bottom + 2 : r.top - 2 - m.offsetHeight) + "px";
   m.onclick = e => { const a = e.target.closest("button")?.dataset.a; if (!a) return; closeStopMenu(); doAct(a); };
 }
-document.addEventListener("click", e => { if (!e.target.closest("#stopMenu, [data-act=stopmenu], [data-act=resetmenu], .bi-act")) closeStopMenu(); });
+document.addEventListener("click", e => { if (!e.target.closest("#stopMenu, [data-act=stopmenu], [data-act=resetmenu], .bi-act, #presetsBtn")) closeStopMenu(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeStopMenu(); });
 async function doAct(a) {
   const confirms = {reset: "Start a fresh ladder at step 1? Profit since Reset and Wins / Losses go back to 0 (the history is kept).",
     reset_ladder: `Back to step 1?${status.streak_lost ? ` This streak's ${moneyFull(status.streak_lost)} loss is accepted (not won back).` : ""} Profit since Reset and Wins / Losses stay.`,
     paper_reset: `Reset the paper account to ${moneyFull(status.settings.paper_balance_usd)}? The ladder starts again too (the history is kept).`,
     delete: `Delete bot "${status.name}" with its settings, history and log?`,
-    start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${status.settings.budget_usd > 0 ? moneyFull(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + moneyFull(status.balance) + " can be lost"}\nFirst bet: about ${moneyFull(status.ladder.rows[status.step - 1]?.cost)}` : ""};
+    start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${budgetOf(status) > 0 ? moneyFull(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + moneyFull(status.balance) + " can be lost"}\nFirst bet: about ${moneyFull(status.ladder.rows[status.step - 1]?.cost)}` : ""};
   if (a === "delete") {
     if (!confirm(confirms.delete)) return;
     try { const d = await api(`/api/bots/${current}/delete`, {}); bots = d.bots; current = bots[0]?.id || ""; status = null; renderBots(); buildForm(); refresh(); }

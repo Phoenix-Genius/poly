@@ -39,12 +39,11 @@ def floor2(x: float) -> float:
     return math.floor(round(x * 100, 6)) / 100
 
 
-def entry_window(timeframe: str, setting: int, hit: bool = False) -> float:
-    """Seconds after a round's start during which the bot may still bet (0 = auto: the first third, or the whole
-    round in hit mode)."""
+def entry_window(timeframe: str, setting: int) -> float:
+    """side mode: seconds after a round's start during which the bot may still bet (0 = auto: the first third)."""
     if setting > 0:
         return float(setting)
-    return ROUND_SECONDS[timeframe] - 5 if hit else ROUND_SECONDS[timeframe] / 3
+    return ROUND_SECONDS[timeframe] / 3
 
 
 def mode(cfg) -> str:
@@ -52,61 +51,123 @@ def mode(cfg) -> str:
 
 
 def entry_span(cfg, length: float) -> tuple[float, float]:
-    """(open, close): seconds after a round's start between which the bot may bet. time mode: from Time left
-    before the end to 5 s before it; else from the start through the Entry window."""
-    if mode(cfg) == "time":
-        return max(0.0, length - cfg.time_left_sec), length - 5
-    return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec, mode(cfg) in ("hit", "move"))
+    """(open, close): seconds after a round's start between which the bot may bet. side mode: from the start through
+    the Entry window. conditions mode: until 5 s before the end, from Time left before it when Time is an AND."""
+    if mode(cfg) == "conditions":
+        if getattr(cfg, "cond_time", "off") == "and":
+            return max(0.0, length - cfg.cond_time_sec), length - 5
+        return 0.0, length - 5
+    return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec)
 
 
 def buy_cap(cfg) -> float:
-    """The most the bot pays per share: Max price, or Pay at most in hit, time and move mode (0 = no limit: 0.99)."""
-    if mode(cfg) in ("hit", "time", "move"):
-        return cfg.hit_max_price or 0.99
+    """The most the bot pays per share (the order's limit): Max price (side mode), or Price to (conditions mode;
+    empty or no Price condition: 0.99)."""
+    if mode(cfg) == "conditions":
+        return price_range(cfg)[1] if getattr(cfg, "cond_price", "off") != "off" else 0.99
     return cfg.max_price
 
 
 def plan_price(cfg) -> float:
-    """The price the ladder table assumes, the dearest the bot's settings let it pay: the Max price, or Pay at most
-    in hit and time mode. With no limit: the Hit price (hit), or Leader at least / 0.75 (time)."""
-    if mode(cfg) == "hit":
-        return cfg.hit_max_price or cfg.hit_price
-    if mode(cfg) == "time":
-        return cfg.hit_max_price or cfg.time_min_price or 0.75
-    if mode(cfg) == "move":
-        return cfg.hit_max_price or 0.75
+    """The price the ladder table assumes, the dearest the bot's settings let it pay: the Max price, or Price to in
+    conditions mode (no limit: Price from if it is dearer than 0.75, else 0.75)."""
+    if mode(cfg) == "conditions":
+        return price_range(cfg)[1] if cfg.cond_price != "off" else 0.75
     return cfg.max_price
 
 
-def leader_side(cfg, prices: dict) -> tuple[Optional[str], str]:
-    """time mode: (side, "") for the leading side (the dearer best ask) when its price is within Leader at least and
-    Pay at most, else (None, why)."""
+def price_range(cfg) -> tuple[float, float]:
+    """conditions mode: the Price condition's (from, to); empty = 0.50 and 0.95. From 0.50 = the favourite only (with
+    no minimum, the losing side at 0.02-0.10 passes whenever the favourite is above Price to, and those bets win
+    ~1%); above 0.95 a win pays 5c a share or less."""
+    return cfg.cond_price_min or 0.5, cfg.cond_price_max or 0.95
+
+
+def price_range_text(cfg) -> str:
+    lo, hi = price_range(cfg)
+    return f"{lo:.2f}-{hi:.2f}"
+
+
+def conditions_text(cfg) -> str:
+    """conditions mode in words, e.g. "time <= 90s AND move >= $10 AND price 0.75-0.95"."""
+    parts = []
+    for c, op in cfg.conditions().items():
+        what = {"time": f"time <= {cfg.cond_time_sec}s", "move": f"move >= ${cfg.cond_move_usd:g}",
+                "price": f"price {price_range_text(cfg)}"}[c]
+        parts.append((op.upper(), what))
+    ands = [w for op, w in parts if op == "AND"]
+    ors = [w for op, w in parts if op == "OR"]
+    text = " AND ".join(ands)
+    if ors:
+        text += (" AND " if ands else "") + ("(" + " OR ".join(ors) + ")" if ands and len(ors) > 1 else " OR ".join(ors))
+    return text
+
+
+def leader_of(sides: list, prices: dict) -> str:
+    """conditions mode, when both sides pass: the dearer one (the market's favourite); Up on a tie."""
+    if len(sides) == 1:
+        return sides[0]
     up, down = prices.get("up"), prices.get("down")
-    show = " / ".join(f"{s.upper()} {p:.2f}" for s, p in sorted(prices.items()) if p is not None) or "no prices"
-    if up is None or down is None or abs(up - down) < 1e-9:
-        return None, f"no clear leader ({show})"
-    side = "up" if up > down else "down"
-    p = prices[side]
-    if p < cfg.time_min_price - 1e-9:
-        return None, f"{side.upper()} leads at {p:.2f}, below Leader at least {cfg.time_min_price:.2f}"
-    if p > buy_cap(cfg) + 1e-9:
-        return None, f"{side.upper()} leads at {p:.2f}, above Pay at most {buy_cap(cfg):.2f}"
-    return side, ""
+    return "down" if up is not None and down is not None and down > up else "up"
 
 
-def hit_side(cfg, prices: dict) -> tuple[Optional[str], str]:
-    """hit mode: (side, "") for the side whose best ask is between the Hit price and Pay at most, else (None, why).
-    Both sides can't sensibly be at 0.75+ at once; if they are, the dearer one is the market's favourite."""
-    cap = buy_cap(cfg)
-    ok = [(p, s) for s, p in prices.items() if p is not None and cfg.hit_price - 1e-9 <= p <= cap + 1e-9]
-    if ok:
-        return max(ok)[1], ""
-    over = [(p, s) for s, p in prices.items() if p is not None and p > cap + 1e-9]
-    if over:
-        p, s = max(over)
-        return None, f"{s.upper()} is at {p:.2f}, above Pay at most {cap:.2f}"
-    show = " / ".join(f"{s.upper()} {p:.2f}" for s, p in sorted(prices.items()) if p is not None) or "no prices"
-    return None, f"no side at {cfg.hit_price:.2f} yet ({show})"
+def sides_allowed(cfg, left: float, move: Optional[float], prices: dict) -> tuple[list, str]:
+    """conditions mode: (the sides the conditions allow right now, why not when none).
+
+    Each condition that is on is true for a set of sides: Time left (both, while `left` <= Time left at most),
+    Move (the way the coin moved, while |move| >= Move at least; None = no live price or Price To Beat yet) and
+    Price (each side whose best ask is within Price from-to). A side is allowed when every AND condition is true for
+    it and, if any condition is OR, at least one OR condition is too. buy_cap (Price to) is checked after."""
+    both = {"up", "down"}
+    sets: dict[str, set] = {}
+    why: dict[str, str] = {}
+    conds = cfg.conditions()
+    if "time" in conds:
+        ok = left <= cfg.cond_time_sec + 1e-9
+        sets["time"] = both if ok else set()
+        why["time"] = f"{left:.0f} s left, waiting for {cfg.cond_time_sec} s"
+    if "move" in conds:
+        if move is None:
+            sets["move"], why["move"] = set(), "no live price / Price To Beat yet"
+        else:
+            sets["move"] = {"up" if move > 0 else "down"} if abs(move) >= cfg.cond_move_usd - 1e-9 else set()
+            why["move"] = f"moved ${abs(move):,.2f} {'up' if move >= 0 else 'down'}, needs ${cfg.cond_move_usd:,.2f}"
+    if "price" in conds:
+        lo, hi = price_range(cfg)
+        sets["price"] = {s for s, p in prices.items() if p is not None and lo - 1e-9 <= p <= hi + 1e-9}
+        show = " / ".join(f"{s.upper()} {p:.2f}" for s, p in sorted(prices.items()) if p is not None) or "no prices"
+        dear = [(p, s) for s, p in prices.items() if p is not None and p > hi + 1e-9]
+        why["price"] = f"{max(dear)[1].upper()} costs {max(dear)[0]:.2f}, above Price to {hi:.2f}" \
+            if dear and not sets["price"] and lo >= 0.5 else f"no side at {price_range_text(cfg)} ({show})"
+    allowed = set(both)
+    for c, op in conds.items():
+        if op == "and":
+            allowed &= sets[c]
+    ors = [c for c, op in conds.items() if op == "or"]
+    if ors:
+        allowed &= set().union(*(sets[c] for c in ors))
+    if allowed:
+        return sorted(allowed), ""
+    # say what is missing: the AND conditions that are false, else (all ANDs true) the ORs
+    ands_false = [why[c] for c, op in conds.items() if op == "and" and not sets[c]]
+    if ands_false:
+        return [], "; ".join(ands_false)
+    if ors and not any(sets[c] for c in ors):
+        return [], " or ".join(why[c] for c in ors)
+    if "price" in conds:          # the other conditions want a side that costs more than Price to
+        want = set(both)
+        for c, op in conds.items():
+            if c != "price" and op == "and":
+                want &= sets[c]
+        other_ors = [c for c in ors if c != "price"]
+        if other_ors:
+            want &= set().union(*(sets[c] for c in other_ors))
+        hi = price_range(cfg)[1]
+        dear = sorted((prices[x], x) for x in want if prices.get(x) is not None and prices[x] > hi + 1e-9)
+        if dear:
+            return [], f"{dear[-1][1].upper()} costs {dear[-1][0]:.2f}, above Price to {hi:.2f}"
+    return [], "the conditions point to different sides (" + ", ".join(
+        f"{c} {'/'.join(x.upper() for x in sorted(sets[c])) or '-'}" for c in conds) + ")"
 
 
 @dataclass
@@ -123,18 +184,31 @@ class Ladder:
     base: float = 0.0              # Steps to survive: this streak's Profit per win / Starting bet (0 = settings')
     wins_left: int = 0             # Recover over N wins: wins still needed to clear streak_lost (0 = N)
 
-    def record(self, side: str, won: bool, profit: float, recover_wins: int = 1) -> None:
+    def record(self, side: str, won: bool, profit: float, recover_wins: int = 1,
+               base_profit: Optional[float] = None) -> None:
+        """base_profit (recover sizing): the Profit per win the bet was sized for. A win then pays back only what
+        it really earned over that, so a fill dearer than planned (slippage) leaves the shortfall owed instead of
+        writing it off. None (multiply sizing): a win clears the streak, as before."""
         self.pnl += profit
         self.last_side, self.last_won = side, won
         if won:
             self.wins += 1
             self.step = 1
             left = self.wins_left or recover_wins
-            if left <= 1 or self.streak_lost <= 0:
+            if self.streak_lost <= 0:
                 self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
-            else:                                 # this win paid back 1/left of the debt; the rest is carried
-                self.streak_lost -= self.streak_lost / left
-                self.wins_left = left - 1
+            elif base_profit is None:
+                if left <= 1:
+                    self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
+                else:                             # this win paid back 1/left of the debt; the rest is carried
+                    self.streak_lost -= self.streak_lost / left
+                    self.wins_left = left - 1
+            else:
+                self.streak_lost -= max(0.0, profit - base_profit)
+                if self.streak_lost <= 0.005:
+                    self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
+                else:                             # still owed (planned share or a short win): carry it
+                    self.wins_left = max(1, left - 1)
         else:
             self.losses += 1
             self.step += 1
@@ -265,6 +339,11 @@ def choose_side(cfg, ladder: Ladder, last_result: Optional[str], prices: dict,
         return last_result or first
     if mode == "opposite_last":
         return other(last_result) if last_result else first
+    if mode == "leader":
+        up, down = prices.get("up"), prices.get("down")
+        if up is not None and down is not None and up != down:
+            return "up" if up > down else "down"
+        return first
     if mode == "cheaper":
         up, down = prices.get("up"), prices.get("down")
         if up is not None and down is not None:
@@ -348,10 +427,10 @@ def streak_sizing(cfg, step: int, base: float, budget: float, carried: bool = Fa
     """(sizing, base) for a bet at `step` of a streak. Without Steps to survive: (cfg, 0). With it, a new streak
     (step 1, or no base yet) works out its first bet from `budget` at the Max price; later steps keep `base`.
     sizing is None when the budget can't pay for the steps."""
-    if not cfg.target_steps:
+    if not cfg.survive_steps:
         return cfg, 0.0
     if (step == 1 and not carried) or not base:     # carried: a debt still being won back keeps its streak's base
-        base = base_for_steps(cfg, cfg.target_steps, buy_cap(cfg), budget)
+        base = base_for_steps(cfg, cfg.survive_steps, buy_cap(cfg), budget)
         if base is None:
             return None, 0.0
     return with_base(cfg, base), base

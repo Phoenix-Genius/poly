@@ -101,35 +101,37 @@ class EngineTest(unittest.TestCase):
         bot.tick()
         self.assertIsNotNone(bot.bet)
 
-    def test_hit_mode_buys_first_side_to_reach_hit_price(self):
+    # the old hit, time and move Bet modes: a bot saved with them is converted to conditions that bet the same
+    def test_old_hit_mode_buys_first_side_to_reach_hit_price(self):
         self.pm.prices.update(up=0.52, down=0.49)
         bot = self.make(entry_mode="hit", hit_price=0.75, hit_max_price=0.80)
+        self.assertEqual((bot.cfg.entry_mode, bot.cfg.conditions()), ("conditions", {"price": "and"}))
         self.clock.t += 5
         bot.tick()
         self.assertIsNone(bot.bet)
-        self.assertIn("Waiting for a side to reach 0.75", bot.message)
-        self.clock.t += 200                         # past the normal entry window: hit mode watches the whole round
+        self.assertIn("no side at 0.75-0.80", bot.message)
+        self.clock.t += 200                         # past the side mode's entry window: the whole round
         self.pm.prices.update(up=0.24, down=0.77)
         bot.tick()
         self.assertIsNotNone(bot.bet, bot.message)
-        self.assertEqual(bot.bet["side"], "down")   # side_mode up_only is ignored in hit mode
+        self.assertEqual(bot.bet["side"], "down")   # side_mode up_only isn't used
         self.assertAlmostEqual(bot.bet["price"], 0.77)
         # recover sizing at 0.77: one win pays the Profit per win after fees
         win = bot.bet["shares"] - bot.bet["cost"]
         self.assertGreaterEqual(win, 2.5 - 0.01)
 
-    def test_hit_mode_waits_when_price_jumped_past_cap(self):
+    def test_old_hit_mode_waits_when_price_jumped_past_cap(self):
         self.pm.prices.update(up=0.90, down=0.11)
         bot = self.make(entry_mode="hit", hit_price=0.75, hit_max_price=0.80)
         self.clock.t += 5
         bot.tick()
         self.assertIsNone(bot.bet)
-        self.assertIn("above Pay at most 0.80", bot.message)
+        self.assertIn("UP costs 0.90, above Price to 0.80", bot.message)
         self.pm.prices.update(up=0.79, down=0.22)
         bot.tick()
         self.assertEqual(bot.bet["side"], "up")
 
-    def test_time_mode_buys_leader_when_time_left(self):
+    def test_old_time_mode_buys_leader_when_time_left(self):
         self.pm.prices.update(up=0.40, down=0.61)
         bot = self.make(entry_mode="time", time_left_sec=120)
         self.clock.t += 60
@@ -138,19 +140,19 @@ class EngineTest(unittest.TestCase):
         self.assertIn("Waiting until 2m 00s are left", bot.message)
         self.clock.t += 125                          # 185 s in: 115 s left
         bot.tick()
-        self.assertEqual(bot.bet["side"], "down")    # the leader; side_mode up_only is ignored
+        self.assertEqual(bot.bet["side"], "down")    # the leader; side_mode up_only isn't used
         self.assertAlmostEqual(bot.bet["price"], 0.61)
 
-    def test_time_mode_leader_price_limits(self):
+    def test_old_time_mode_leader_price_limits(self):
         self.pm.prices.update(up=0.55, down=0.46)
         bot = self.make(entry_mode="time", time_left_sec=120, time_min_price=0.60, hit_max_price=0.90)
         self.clock.t += 185
         bot.tick()
         self.assertIsNone(bot.bet)
-        self.assertIn("below Leader at least 0.60", bot.message)
+        self.assertIn("no side at 0.60-0.90", bot.message)        # the leader below Leader at least
         self.pm.prices.update(up=0.95, down=0.06)
         bot.tick()
-        self.assertIn("above Pay at most 0.90", bot.message)
+        self.assertIn("UP costs 0.95, above Price to 0.90", bot.message)
         self.pm.prices.update(up=0.70, down=0.31)
         bot.tick()
         self.assertEqual(bot.bet["side"], "up")
@@ -172,31 +174,37 @@ class EngineTest(unittest.TestCase):
 
             def price_to_beat(self, coin, r, tf):
                 return self.beat
+
+            def settle_prices(self, coin, r, tf):     # (now, Price To Beat, exact): the TWAPs in the real feed
+                return self.now, self.beat, True
+
+            def twap(self, coin, at=None):
+                return None
         feed = Feed()
         feed.now, feed.beat = now, beat
         self.pm.coin_prices = feed
         return feed
 
-    def test_move_mode_bets_the_way_the_coin_moved(self):
+    def test_old_move_mode_bets_the_way_the_coin_moved(self):
         feed = self.move_feed(71500.0, 71540.08)     # $40.08 below: not yet
         bot = self.make(entry_mode="move", move_usd=50)
         self.clock.t += 30
         bot.tick()
         self.assertIsNone(bot.bet)
-        self.assertIn("$40.08 below the Price To Beat $71,540.08", bot.message)
+        self.assertIn("moved $40.08 down, needs $50.00", bot.message)
         feed.now = 71489.0                           # $51.08 below: bet Down (side_mode up_only is ignored)
         bot.tick()
         self.assertEqual(bot.bet["side"], "down")
         self.assertAlmostEqual(bot.bet["price_to_beat"], 71540.08)
 
-    def test_move_mode_respects_pay_at_most(self):
+    def test_old_move_mode_respects_pay_at_most(self):
         self.move_feed(71700.0, 71540.0)             # $160 above: Up
         self.pm.prices["up"] = 0.85
         bot = self.make(entry_mode="move", move_usd=50, hit_max_price=0.8)
         self.clock.t += 30
         bot.tick()
         self.assertIsNone(bot.bet)
-        self.assertIn("above Pay at most 0.80", bot.message)
+        self.assertIn("UP costs 0.85, above Price to 0.80", bot.message)
         self.pm.prices["up"] = 0.78
         bot.tick()
         self.assertEqual(bot.bet["side"], "up")
@@ -226,7 +234,7 @@ class EngineTest(unittest.TestCase):
                                - float(bets[1]["cost"]), base, delta=0.05)   # the win earned the worked-out profit
 
     def test_steps_to_survive_too_few_funds(self):
-        bot = self.make(target_steps=12, budget_usd=20, max_price=0.6)
+        bot = self.make(target_steps=12, budget_usd=20, max_price=0.6, on_ladder_end="stop")
         self.clock.t += 5
         bot.tick()
         self.assertIsNone(bot.bet)
@@ -249,7 +257,8 @@ class EngineTest(unittest.TestCase):
         self.assertGreater(again.ladder.pnl, 0)
 
     def test_budget_ends_ladder(self):
-        bot = self.make(budget_usd=10, on_ladder_end="stop")    # 2.69 + 5.56 fit, the 11.53 step 3 doesn't
+        bot = self.make(on_ladder_end="stop")                   # 2.69 + 5.56 fit, the 11.53 step 3 doesn't
+        bot.client.reset(10.0)                                  # a paper bot's budget is its Paper balance
         self.play(bot, "down")
         self.play(bot, "down")
         self.clock.t += 5
@@ -293,6 +302,36 @@ class EngineTest(unittest.TestCase):
         self.assertEqual([e["kind"] for e in ev], ["ladder_end"])
         self.assertIn("Reset by itself", ev[0]["text"])
 
+    def test_steps_to_survive_is_side_mode_only(self):
+        bot = self.make(entry_mode="hit", hit_price=0.75, target_steps=5, on_ladder_end="stop")
+        self.assertEqual((bot.cfg.target_steps, bot.cfg.survive_steps), (5, 0))     # kept, but not used
+        self.pm.prices["up"] = 0.80                                                    # reaches the Hit price
+        self.clock.t += 5
+        bot.tick()
+        self.assertFalse(bot.halted)
+        self.assertAlmostEqual(bot.bet["shares"] - bot.bet["cost"], 2.5, delta=0.1)   # Profit per win as set
+        self.assertEqual(self.make(target_steps=5).cfg.survive_steps, 5)              # side mode: used
+
+    def test_reset_mode_waits_at_step1_when_short(self):
+        bot = self.make(on_ladder_end="reset")                   # the step 1 bet costs 2.69
+        bot.client.reset(2.0)
+        self.clock.t += 5
+        bot.tick()
+        self.assertFalse(bot.halted)
+        self.assertIsNone(bot.bet)
+        self.assertEqual(bot.phase, "waiting")
+        self.assertIn("Waiting for a round where the step 1 bet fits", bot.message)
+        self.assertEqual(read_events(bot.cfg.folder), [])                 # not a ladder end
+        bot.client.reset(10.0)                                            # it fits now: bets
+        bot.tick()
+        self.assertIsNotNone(bot.bet)
+
+    def test_reset_mode_start_works_after_an_old_step1_stop(self):
+        bot = self.make(on_ladder_end="reset")
+        bot.halted, bot.halt_message = "ladder", "Ladder ended at step 1: the step 1 bet costs $764.29 ..."
+        bot.on_start()                                                    # no Reset needed
+        self.assertFalse(bot.halted)
+
     def test_until_earn_stops(self):
         bot = self.make(stop_profit_usd=4)
         bot.on_start()
@@ -315,12 +354,27 @@ class EngineTest(unittest.TestCase):
         lost = bot.ladder.streak_lost
         self.play(bot, "up")                                  # half back: still owed, back at step 1
         self.assertEqual(bot.ladder.step, 1)
-        self.assertAlmostEqual(bot.ladder.streak_lost, lost / 2, places=6)
+        self.assertAlmostEqual(bot.ladder.streak_lost, lost / 2, places=2)  # shares round up a cent: a hair more back
         self.assertEqual(bot.ladder.wins_left, 1)
         self.assertLess(bot.ladder.pnl, 0)
         self.play(bot, "up")                                  # the second win clears it, both wins' profit kept
         self.assertEqual(bot.ladder.streak_lost, 0)
         self.assertGreater(bot.ladder.pnl, 2 * 2.5 - 0.2)
+
+    def test_short_win_keeps_the_shortfall_owed(self):
+        from poly_bot.strategy import Ladder
+        lad = Ladder()
+        lad.record("up", False, -75.45, 2, 2.5)
+        lad.record("up", False, -155.03, 2, 2.5)        # owes 230.48; each of 2 wins should pay 115.24 + 2.5
+        lad.record("up", True, 65.17, 2, 2.5)           # slippage: the win earned 65.17, not 117.74
+        self.assertAlmostEqual(lad.streak_lost, 230.48 - 62.67, places=6)
+        self.assertEqual(lad.wins_left, 1)
+        lad.record("up", True, 123.07, 2, 2.5)          # sized for half; still short, so the rest stays owed
+        self.assertAlmostEqual(lad.streak_lost, 167.81 - 120.57, places=6)
+        self.assertEqual(lad.wins_left, 1)
+        lad.record("up", True, 47.24 + 2.5, 2, 2.5)
+        self.assertEqual(lad.streak_lost, 0)
+        self.assertEqual(lad.wins_left, 0)
 
     def test_until_earn_counts_since_reset_not_start(self):
         bot = self.make(stop_profit_usd=4)
@@ -347,7 +401,7 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(bot.bet["side"], "down")
 
     def test_paper_balance_too_small(self):
-        bot = self.make()
+        bot = self.make(on_ladder_end="stop")
         bot.client.reset(1.0)
         self.clock.t += 5
         bot.tick()

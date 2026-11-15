@@ -598,6 +598,9 @@ def serve_hosted(host: str, port: int, adopt_email: str = "") -> None:
         if not u["disabled"] and h.is_approved(u):   # guests and accounts waiting for approval: no bots to run
             h.app_for(u)
     h.resume_all()
+    from .instance import ROOT
+    from .prices import Recorder
+    Recorder(ROOT / "data" / "research" / "chainlink").start()   # every Chainlink price, for research
     server = bind_server(host, port, make_hosted_handler(h), tries=1)
     log.info("Hosted app on http://%s:%d for %s (%d users)", host, server.server_address[1],
              ", ".join(env_list("PUBLIC_HOSTS")) or "localhost", len(h.apps))

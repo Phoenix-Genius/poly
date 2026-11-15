@@ -12,8 +12,9 @@ from typing import Any
 
 COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"]
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "daily"]
-SIDE_MODES = ["alternate", "follow_last", "opposite_last", "cheaper", "up_only", "down_only",
+SIDE_MODES = ["alternate", "follow_last", "opposite_last", "cheaper", "leader", "up_only", "down_only",
               "flip_on_loss", "flip_on_win", "random"]
+COND_OPS = ["off", "and", "or"]
 
 # key: (default, type, options-or-None, label, help)
 FIELDS: dict[str, tuple] = {
@@ -35,8 +36,8 @@ FIELDS: dict[str, tuple] = {
                   "the start? Up wins if yes, Down if no."),
     "budget_usd": (0.0, "number", None, "Budget (USDC)",
                    "How much the bot may lose in total. Profits are added to it and losses taken from it. When "
-                   "the next bet costs more than what's left, the ladder ends. Empty (or 0) = the whole balance "
-                   "(paper or live)."),
+                   "the next bet costs more than what's left, the ladder ends. Empty (or 0) = the whole balance. "
+                   "Live only (your live bots share one wallet): a paper bot's Paper balance is its budget."),
     "stop_profit_usd": (0.0, "number", None, "Until earn ($)",
                         "Stop once Profit since Reset reaches this, e.g. 20 (Stop/Start and app restarts don't change it; "
                         "Reset starts counting again). "
@@ -66,42 +67,50 @@ FIELDS: dict[str, tuple] = {
                      "Work out the first bet so the budget pays for this many losses in a row, e.g. 7, even if "
                      "every bet costs the Max price. recover sizing sets the Profit per win, multiply sizing the "
                      "Starting bet; that setting is then not used. Recalculated from the budget left at each new "
-                     "streak (step 1), so it grows after wins. 0 (or empty) = off."),
+                     "streak (step 1), so it grows after wins. 0 (or empty) = off. Side mode only: in conditions "
+                     "mode a bet often costs 0.75-0.99, so each step costs ~4-20x the last."),
     "max_steps": (0, "int", None, "Max losses in a row",
                   "End the ladder after this many losses in a row. 0 = no fixed limit, the budget decides."),
     "on_ladder_end": ("reset", "select", ["stop", "reset"], "When the ladder ends",
                       "What to do after max losses in a row, or when the budget can't pay the next bet. "
-                      "stop = halt the bot (you press Reset). reset = accept the loss and restart at step 1."),
+                      "stop = halt the bot (you press Reset). reset = accept the loss and restart at step 1; "
+                      "at step 1 it skips a round it can't pay and waits for one where the bet fits."),
     # --- side -------------------------------------------------------------------------------------------
-    "entry_mode": ("side", "select", ["side", "hit", "time", "move"], "Bet mode",
+    "entry_mode": ("side", "select", ["side", "conditions"], "Bet mode",
                    "side = pick a side by the Side mode and buy it near 50 cents early in the round (Min/Max price, "
-                   "Entry window). hit = no side choice: watch both sides and buy whichever first reaches the Hit "
-                   "price (e.g. 0.75), any time in the round. time = when Time left is reached (e.g. 120 s before "
-                   "the end), buy the side that is leading (the dearer one). move = when the coin's price is Move ($) "
-                   "or more above the round's Price To Beat, buy Up; that far below, buy Down. A higher price wins "
-                   "more often but "
-                   "pays less: at 0.75 a win pays about 0.24 per share and a loss costs about 0.76, so it has to "
-                   "win about 77% to break even, and each martingale step costs about 4x the last."),
-    "hit_price": (0.75, "number", None, "Hit price",
-                  "hit mode: buy the first side whose price reaches this, e.g. 0.75 = 75 cents."),
-    "move_usd": (50.0, "number", None, "Move ($)",
-                 "move mode: bet once the coin's live price (Chainlink, what the round settles on) is this many "
-                 "dollars above the round's Price To Beat (buy Up) or below it (buy Down), e.g. 50 for BTC. Any time "
-                 "in the round unless Entry window is set."),
-    "hit_max_price": (0.0, "number", None, "Pay at most",
-                      "hit, time and move mode: never pay more than this per share, e.g. 0.80. If the side is dearer, the "
-                      "bot waits for its price to come back within it. Empty (or 0) = no limit: buy at whatever the "
-                      "price is when the bot sees it (up to 0.99)."),
-    "time_left_sec": (120, "int", None, "Time left (s)",
-                      "time mode: bet when this many seconds are left in the round, e.g. 120 = 2 minutes before the "
-                      "end. If the leader's price isn't within Leader at least / Pay at most then, the bot keeps "
-                      "checking until 5 s before the end."),
-    "time_min_price": (0.0, "number", None, "Leader at least",
-                       "time mode: bet only if the leading side costs at least this, e.g. 0.60 (it leads clearly). "
-                       "Empty (or 0) = any lead."),
+                   "Entry window). conditions = bet when your Time left, Move and Price conditions are met, each "
+                   "AND (must be true) or OR (one of the ORs is enough), e.g. 90 s or less left AND moved $10+ AND "
+                   "the side costs 0.75-0.95; Move picks the way the coin moved, Price the side in range, and when "
+                   "both sides pass it bets the leader (the dearer side). A higher price wins more often but pays "
+                   "less: at 0.75 a win pays about 0.24 per share and a loss costs about 0.76, so it has to win "
+                   "about 77% to break even, and each martingale step costs about 4x the last."),
+    # --- conditions mode -----------------------------------------------------------------------------------------
+    "cond_time": ("and", "select", COND_OPS, "Time left",
+                  "conditions mode: off, AND (must be true) or OR (this or another OR condition). True while this many "
+                  "seconds or fewer are left in the round (≤ s left). Doesn't pick a side."),
+    "cond_time_sec": (90, "int", None, "≤ s left",
+                      "conditions mode: the Time left condition is true from this many seconds before the end, e.g. 90, "
+                      "until the bot stops betting 5 s before the end."),
+    "cond_move": ("and", "select", COND_OPS, "Move",
+                  "conditions mode: off, AND or OR. True for Up while the coin's live price (Chainlink, what the round "
+                  "settles on) is the ≥ $ from beat amount above the round's Price To Beat, for Down while it is that far "
+                  "below. Checked on the price right now, not the highest it reached."),
+    "cond_move_usd": (10.0, "number", None, "≥ $ from beat",
+                      "conditions mode: how many dollars from the Price To Beat the Move condition needs, e.g. 10 for BTC."),
+    "cond_price": ("and", "select", COND_OPS, "Price",
+                   "conditions mode: off, AND or OR. True for each side whose price (best ask) is between Price from and "
+                   "Price to."),
+    "cond_price_min": (0.0, "number", None, "Price from",
+                       "conditions mode: the Price condition's lowest price per share, e.g. 0.75. Empty = 0.50: "
+                       "the favourite only, never the side the market expects to lose."),
+    "cond_price_max": (0.0, "number", None, "Price to",
+                       "conditions mode: the Price condition's highest price per share, e.g. 0.95. Also the most the bot "
+                       "ever pays per share (the order's limit, so a fill can't slip above it), even when the bet "
+                       "came from an OR Move. Empty = 0.95. Price off = no limit (up to 0.99)."),
     "side_mode": ("alternate", "select", SIDE_MODES, "Side mode",
-                  "alternate = Up, Down, Up, Down... follow_last = bet what the last finished round was "
+                  "side mode: which side to bet. alternate = Up, Down, Up, Down... follow_last = bet what the last finished round was "
                   "(momentum). opposite_last = bet against it. cheaper = the side with the lower price. "
+                  "leader = the dearer side (the one the market expects to win). "
                   "up_only / down_only = one side. flip_on_loss = keep the side after a win, switch after a "
                   "loss. flip_on_win = the opposite. random = coin flip."),
     "first_side": ("up", "select", ["up", "down"], "First side",
@@ -123,6 +132,37 @@ FIELDS: dict[str, tuple] = {
     "poll_interval_sec": (2.0, "number", None, "Check interval (s)",
                           "How often the bot checks the round. 1-5 is fine."),
 }
+
+
+def upgrade(values: dict) -> dict:
+    """Old settings -> today's, so old config files and presets keep working (2026-11-16: the hit, time, move and
+    mixed Bet modes became one "conditions" mode). Each old mode becomes the conditions that bet exactly the same:
+      hit:  Price AND from Hit price to Pay at most (empty = no limit)
+      time: Time left AND <= Time left + Price AND from Leader at least to Pay at most (the leader when both pass)
+      move: Move AND >= Move ($) + Price AND up to Pay at most (Price off when there was no limit)
+    Returns a new dict; unknown keys are left for the caller to drop."""
+    v = dict(values)
+    mode = v.get("entry_mode")
+    if mode == "mixed":
+        v["entry_mode"] = "conditions"
+    elif mode in ("hit", "time", "move"):
+        cap = float(v.get("hit_max_price") or 0)
+        off = {"cond_time": "off", "cond_move": "off", "cond_price": "off", "cond_price_min": 0.0, "cond_price_max": 0.0}
+        if mode == "hit":
+            off.update(cond_price="and", cond_price_min=float(v.get("hit_price") or 0.75), cond_price_max=cap)
+        elif mode == "time":
+            lead = float(v.get("time_min_price") or 0)
+            off.update(cond_time="and", cond_time_sec=int(float(v.get("time_left_sec") or 120)))
+            if lead or cap:
+                off.update(cond_price="and", cond_price_min=lead, cond_price_max=cap)
+        else:
+            off.update(cond_move="and", cond_move_usd=float(v.get("move_usd") or 50))
+            if cap:
+                off.update(cond_price="and", cond_price_max=cap)
+        v.update(off, entry_mode="conditions")
+    for old in ("hit_price", "hit_max_price", "time_left_sec", "time_min_price", "move_usd"):
+        v.pop(old, None)
+    return v
 
 
 def coerce(key: str, value: Any) -> Any:
@@ -147,6 +187,7 @@ class BotConfig:
 
     def __init__(self, folder: Path | str = ".", **values):
         self.folder = Path(folder)
+        values = upgrade(values)
         for key, (default, *_rest) in FIELDS.items():
             setattr(self, key, coerce(key, values.get(key, default)))
 
@@ -168,20 +209,29 @@ class BotConfig:
         return self.bot_name.strip() or f"{self.coin} {self.timeframe}"
 
     @property
-    def hit_mode(self) -> bool:
-        return self.entry_mode == "hit"
+    def conditions_mode(self) -> bool:
+        return self.entry_mode == "conditions"
 
-    @property
-    def time_mode(self) -> bool:
-        return self.entry_mode == "time"
-
-    @property
-    def move_mode(self) -> bool:
-        return self.entry_mode == "move"
+    def conditions(self) -> dict:
+        """conditions mode: {"time"|"move"|"price": "and"|"or"} for the conditions that are on."""
+        return {c: getattr(self, f"cond_{c}") for c in ("time", "move", "price") if getattr(self, f"cond_{c}") != "off"}
 
     @property
     def is_live(self) -> bool:
         return self.network == "live"
+
+    @property
+    def survive_steps(self) -> int:
+        """Steps to survive in effect: side mode only. In hit, time and move mode a bet costs 0.75-0.99 a share, so
+        each step costs ~4-20x the last and fitting several into the budget leaves no real first bet (the saved
+        value is kept and counts again in side mode)."""
+        return self.target_steps if self.entry_mode == "side" else 0
+
+    @property
+    def budget(self) -> float:
+        """The Budget in effect: live only. A paper bot has its own paper account, so its Paper balance is its
+        budget (a Budget saved earlier is kept and counts again if the bot goes live)."""
+        return self.budget_usd if self.is_live else 0.0
 
     @property
     def is_paper(self) -> bool:
@@ -198,7 +248,7 @@ class BotConfig:
             raise ValueError("Bot name: 40 characters at most")
         if self.paper_balance_usd <= 0:
             raise ValueError("Paper balance must be more than 0")
-        for key in ("budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "time_min_price"):
+        for key in ("budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec"):
             if getattr(self, key) < 0:
                 raise ValueError(f"{FIELDS[key][3]} can't be negative")
         if self.base_profit_usd <= 0:
@@ -211,25 +261,22 @@ class BotConfig:
             raise ValueError("Max price must be between 0.02 and 0.98")
         if not (0 <= self.min_price < self.max_price):
             raise ValueError("Min price must be 0 or more and below the max price")
-        if not (0.05 <= self.hit_price <= 0.98):
-            raise ValueError("Hit price must be between 0.05 and 0.98")
-        if self.hit_max_price and not (0.02 <= self.hit_max_price <= 0.99):
-            raise ValueError("Pay at most must be between 0.02 and 0.99, or empty for no limit")
-        if self.entry_mode == "hit" and self.hit_max_price and self.hit_max_price < self.hit_price:
-            raise ValueError("Pay at most must be at least the Hit price, or empty for no limit")
-        if self.move_usd <= 0:
-            raise ValueError("Move ($) must be more than 0")
-        if self.time_left_sec < 10:
-            raise ValueError("Time left must be at least 10 seconds")
-        if self.time_min_price > 0.98:
-            raise ValueError("Leader at least must be 0.98 or less")
-        if self.entry_mode == "time" and self.hit_max_price and self.time_min_price > self.hit_max_price:
-            raise ValueError("Leader at least is above Pay at most")
+        if self.conditions_mode:
+            if not self.conditions():
+                raise ValueError("Conditions mode: turn on at least one condition (Time left, Move or Price)")
+            if self.cond_time_sec < 10:
+                raise ValueError("Time left: ≤ s left must be at least 10 seconds")
+            if self.cond_move_usd <= 0:
+                raise ValueError("Move: ≥ $ from beat must be more than 0")
+            if not (0 <= self.cond_price_min <= 0.99) or not (self.cond_price_max == 0 or 0.01 <= self.cond_price_max <= 0.99):
+                raise ValueError("Price from and Price to must be between 0.01 and 0.99, or empty for no limit")
+            if self.cond_price_max and self.cond_price_min > self.cond_price_max:
+                raise ValueError("Price from is above Price to")
         if not (1 <= self.recover_wins <= 5):
             raise ValueError("Recover over (wins) must be between 1 and 5")
         if not (0 <= self.target_steps <= 30):
             raise ValueError("Steps to survive must be between 1 and 30, or 0 for off")
-        if self.target_steps and self.max_steps and self.max_steps < self.target_steps:
+        if self.survive_steps and self.max_steps and self.max_steps < self.survive_steps:
             raise ValueError(f"Max losses in a row ({self.max_steps}) is below Steps to survive "
                              f"({self.target_steps}): raise it or leave it empty")
         if not (0.5 <= self.poll_interval_sec <= 60):
@@ -238,7 +285,7 @@ class BotConfig:
 
 def load_config(path: Path | str) -> BotConfig:
     path = Path(path)
-    values = json.loads(path.read_text()) if path.exists() else {}
+    values = upgrade(json.loads(path.read_text())) if path.exists() else {}
     cfg = BotConfig(path.parent, **{k: v for k, v in values.items() if k in FIELDS})
     cfg.validate()
     return cfg
@@ -247,8 +294,9 @@ def load_config(path: Path | str) -> BotConfig:
 def save_settings(path: Path | str, body: dict) -> BotConfig:
     """Validate and write the settings in `body` (unknown keys ignored, missing keys kept)."""
     path = Path(path)
-    current = json.loads(path.read_text()) if path.exists() else {}
-    current.update({k: v for k, v in body.items() if k in FIELDS})
+    current = upgrade(json.loads(path.read_text())) if path.exists() else {}
+    current.update(upgrade(body) if body.get("entry_mode") in ("hit", "time", "move", "mixed") else body)
+    current = {k: v for k, v in current.items() if k in FIELDS}
     cfg = BotConfig(path.parent, **{k: v for k, v in current.items() if k in FIELDS})
     cfg.validate()
     write_json(path, cfg.settings())

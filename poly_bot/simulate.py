@@ -6,20 +6,20 @@ Pure logic, no I/O. Two ways to get each bet's price and result:
   result and Up price minute by minute) through the bot's own entry rule for its Bet mode, so every bet has the
   price the bot would really have paid then, and wins only if that round really went that way:
     side: the side the Side mode picks, at the first moment in the Entry window its price is within Min/Max price;
-    hit:  the first side to reach the Hit price, filled HIT_FILL of the way from the Hit price to the next recorded
-          price (prices jump between the bot's 2 s checks; calibrated on the paper bots' real fills), within Pay
-          at most;
-    time: the leader when Time left is reached, if within Leader at least / Pay at most (else the first later
-          moment it is, until 5 s before the end);
-    move: the first second the coin itself (Binance 1 s candles, history.CoinPaths) is Move ($) from the round's
-          start, the way it moved, at the token's price then (within Pay at most).
+    conditions: every COND_STEP seconds, strategy.sides_allowed (the bot's own rule) on the time left, where the
+          coin is then (Binance 1 s candles, history.CoinPaths "c") and the token's price then; the leader (dearer
+          side) when both sides pass, within Price to. Priced at the next recorded point when Move is a condition
+          (the market reprices within seconds of the coin's move), HIT_FILL of the way from Price from to the next
+          recorded price when Price was just reached (prices jump between the bot's 2 s checks; calibrated on the
+          paper bots' real hit fills).
   The price paid is the path's price plus SPREAD (the ask is a little above the mid). A bet is only placed once the
   previous one is paid out (SETTLE_SEC after its round ends), like the bot. Runs stitch random half-day stretches
   of the history together, so each run sees real streaks but runs differ.
   Then the **price gap** is added: 1-minute history can't show how fast prices move, so the replay's prices come
   out cheaper than what the bots really pay. price_gap() measures it on the owner's own bots' real bets (same
-  mode, same rounds: real price paid minus the replay's), falling back to DEFAULT_GAP (measured 2026-11-14 on
-  BTC 5m: side -0.2c, hit +4.6c, time +4.0c, move +13.7c) until there are MIN_GAP_BETS of them.
+  mode, same rounds: real price paid minus the replay's), falling back to default_gap() (from DEFAULT_GAP, measured
+  2026-11-14 on BTC 5m in the old modes: side -0.2c, hit +4.6c, time +4.0c, move +13.7c) until there are
+  MIN_GAP_BETS of them.
 - **fair** (tests only, not offered on the page since 2026-11-14: "everything ... based on real history"): every
   bet at one price, winning with that chance.
 
@@ -34,18 +34,45 @@ import statistics
 from types import SimpleNamespace
 from typing import Optional
 
-from .strategy import ROUND_SECONDS, buy_cap, choose_side, cost_of, entry_span, fee_per_share, shares_for, streak_sizing
+from .strategy import (ROUND_SECONDS, buy_cap, choose_side, cost_of, entry_span, fee_per_share, leader_of, sides_allowed,
+                       shares_for,
+                       streak_sizing)
 
 MAX_WORK = 1_000_000          # runs x bets per request, so one click can't freeze the app
 SAMPLE_PATHS = 5              # P&L curves returned for the chart
 LOG_ROWS = 1000               # bets of run 1 listed one by one
 PATH_POINTS = 200             # points per curve (downsampled)
 SPREAD = 0.01                 # the ask is about a cent above the path's (mid) price
-HIT_FILL = 0.6                # hit mode: how far from the Hit price to the next recorded price the fill lands
+HIT_FILL = 0.6                # just reached Price from: how far from it to the next recorded price the fill lands
 SETTLE_SEC = 170              # a round's result comes about this long after it ends (from the bots' history)
 BLOCK_SEC = 12 * 3600         # runs are stitched from random stretches of this length
-# what the bots really paid above the replay's price, per Bet mode (BTC 5m paper bots' bets, 2026-11-14)
+# what the bots really paid above the replay's price, per Bet mode (BTC 5m paper bots' bets, 2026-11-14; hit, time and
+# move were the Bet modes the conditions replaced: a Price, Time left and Move condition alone)
 DEFAULT_GAP = {"side": 0.0, "hit": 0.046, "time": 0.04, "move": 0.137}
+COND_STEP = 2                 # conditions mode: seconds between checks in the replay (the bot checks every ~2 s)
+
+
+def default_gap(cfg) -> float:
+    """The price gap to assume before the bot's own bets measure it. conditions mode: with Price as an AND the bot
+    always sees the price before buying, like the old hit mode, so its gap; else the biggest of its conditions' old
+    modes (move's 13.7c comes from buying the instant the coin crosses, whatever the price)."""
+    if getattr(cfg, "entry_mode", "side") != "conditions":
+        return DEFAULT_GAP["side"]
+    conds = cfg.conditions()
+    if conds.get("price") == "and":
+        return DEFAULT_GAP["hit"]
+    like = {"move": "move", "price": "hit", "time": "time"}
+    return max(DEFAULT_GAP[like[c]] for c in conds)
+
+
+def needs_coin(cfg) -> bool:
+    """Whether the replay needs the coin's own price inside each round (CoinPaths)."""
+    return getattr(cfg, "entry_mode", "side") == "conditions" and "move" in cfg.conditions()
+
+
+def ladder_free(cfg) -> bool:
+    """Whether the replay's entry in a round is the same whatever the ladder did (worked out once per round)."""
+    return getattr(cfg, "entry_mode", "side") == "conditions"
 GAP_MATCH_SEC = 90            # a real bet counts if placed within this of where the replay buys
 MIN_GAP_BETS = 30             # own real bets needed before the measured gap replaces DEFAULT_GAP
 
@@ -70,62 +97,15 @@ def _ask(mid: float) -> float:
 
 def entry_for(cfg, rnd: dict, side: Optional[str] = None) -> Optional[tuple]:
     """(seconds into the round, side, price paid) where the bot would have bought in this round, or None.
-    side mode needs the `side` the Side mode picked; hit and time mode pick it themselves."""
+    side mode needs the `side` the Side mode picked; in conditions mode the conditions pick it."""
     length = rnd["end"] - rnd["start"]
     opens, closes = entry_span(cfg, length)
     h = rnd["h"]
     times = [opens] + [t for t, _ in h if opens < t <= closes]
     mode = getattr(cfg, "entry_mode", "side")
     cap = buy_cap(cfg)
-    if mode == "hit":
-        # Prices jump: the bot (checking every 2 s) fills somewhere between the Hit price and the next recorded
-        # (1-minute) price. HIT_FILL of the way, from the paper bots' real hit fills (0.83 on average for 0.75).
-        prev = None
-        for t in times:
-            up = _price_at(h, t)
-            asks = {"up": _ask(up), "down": _ask(1 - up)}
-            for a, s in sorted(((a, s) for s, a in asks.items()), reverse=True):
-                if a < cfg.hit_price - 1e-9:
-                    continue
-                fill = a if prev is None or prev[s] >= cfg.hit_price else \
-                    round(cfg.hit_price + HIT_FILL * (a - cfg.hit_price), 2)
-                if fill <= cap + 1e-9:
-                    return t, s, fill                                    # (above Pay at most: the bot waits)
-            prev = asks
-        return None
-    if mode == "move":
-        # the coin's own path (rnd["coin"], from Binance candles): the first moment it is Move ($) from the start,
-        # then the token's price at that moment (the bot waits while that side costs more than Pay at most)
-        coin = rnd.get("coin")
-        if not coin:
-            return None
-        for t, hi, lo in coin["k"]:
-            if t < opens or t > closes:
-                continue
-            side = "up" if hi >= cfg.move_usd else "down" if -lo >= cfg.move_usd else None
-            if hi >= cfg.move_usd and -lo >= cfg.move_usd:          # both within one candle: the bigger move
-                side = "up" if hi >= -lo else "down"
-            if side is None:
-                continue
-            # the token's price at the next recorded point (pessimistic): the market reprices within seconds of
-            # the coin's move, and 1-minute points can't show how fast; between the two points it looked +10
-            # points better, at the next point +2 to +3 (BTC 5m, Nov 6-13). Re-check against real move fills.
-            later = [p for tp, p in h if tp >= t]
-            up = later[0] if later else h[-1][1]
-            a = _ask(up if side == "up" else 1 - up)
-            if a <= cap + 1e-9:
-                return t, side, a
-        return None
-    if mode == "time":
-        for t in times:
-            up = _price_at(h, t)
-            s = "up" if up > 0.5 else "down" if up < 0.5 else None
-            if s is None:
-                continue
-            a = _ask(up if s == "up" else 1 - up)
-            if a >= cfg.time_min_price - 1e-9 and a <= cap + 1e-9:
-                return t, s, a
-        return None
+    if mode == "conditions":
+        return _entry_conditions(cfg, rnd, opens, closes, cap)
     for t in times:                                         # side mode: the picked side within Min/Max price
         up = _price_at(h, t)
         a = _ask(up if side == "up" else 1 - up)
@@ -134,8 +114,43 @@ def entry_for(cfg, rnd: dict, side: Optional[str] = None) -> Optional[tuple]:
     return None
 
 
+def _entry_conditions(cfg, rnd: dict, opens: float, closes: float, cap: float) -> Optional[tuple]:
+    h, conds = rnd["h"], cfg.conditions()
+    coin = rnd.get("coin")
+    if "move" in conds and not (coin and (coin.get("a") or coin.get("c"))):
+        return None
+    length = rnd["end"] - rnd["start"]
+    step = max(COND_STEP, int(length // 300))         # long rounds: about 300 checks
+    prev = None
+    t = opens
+    while t <= closes + 1e-9:
+        up = _price_at(h, t)
+        asks = {"up": _ask(up), "down": _ask(1 - up)}
+        move = None
+        if coin and (coin.get("a") or coin.get("c")):   # the 60 s TWAP's move, like the bot (else the close's)
+            c = coin.get("a") or coin["c"]
+            move = c[min(len(c) - 1, int(t // coin.get("s", 1)))]
+        sides, _ = sides_allowed(cfg, length - t, move, asks)
+        if sides:
+            s = leader_of(sides, asks)
+            later = [p for tp, p in h if tp >= t]
+            nxt = later[0] if later else h[-1][1]
+            if "move" in conds:          # the market reprices within seconds of the coin's move
+                fill = _ask(nxt if s == "up" else 1 - nxt)
+            elif "price" in conds and cfg.cond_price_min and prev is not None and prev[s] < cfg.cond_price_min - 1e-9:
+                a = _ask(nxt if s == "up" else 1 - nxt)  # just reached Price from: prices jump
+                fill = round(cfg.cond_price_min + HIT_FILL * max(0.0, a - cfg.cond_price_min), 2)
+            else:
+                fill = asks[s]
+            if fill <= cap + 1e-9:
+                return t, s, fill
+        prev = asks
+        t += step
+    return None
+
+
 def with_gap(e: Optional[tuple], gap: float, cap: float) -> Optional[tuple]:
-    """An entry with the price gap added; None if that real price is above Pay at most (the bot wouldn't buy)."""
+    """An entry with the price gap added; None if that real price is above Price to (or Max price) (the bot wouldn't buy)."""
     if e is None or not gap:
         return e
     price = min(0.99, max(0.01, round(e[2] + gap, 2)))
@@ -169,17 +184,22 @@ def price_gap(rounds: list, bets: list) -> dict:
 class RealFeed:
     """Hands out one run's bets from the past rounds, in order, with random jumps between half-day stretches."""
 
-    def __init__(self, cfg, rounds: list, rng: random.Random, gap: float = 0.0):
+    def __init__(self, cfg, rounds: list, rng: random.Random, gap: float = 0.0, shared: Optional[dict] = None):
+        """shared: one dict for every run of a simulation, so each round's entries are worked out once."""
         self.cfg, self.rounds, self.rng, self.gap, self.cap = cfg, rounds, rng, gap, buy_cap(cfg)
-        self.side_mode = getattr(cfg, "entry_mode", "side") == "side"
+        shared = {} if shared is None else shared
+        self.side_mode = not ladder_free(cfg)
         length = rounds[0]["end"] - rounds[0]["start"] if rounds else 300
         self.block = max(20, int(BLOCK_SEC // length))
-        if not self.side_mode:   # hit and time mode: the entry doesn't depend on the ladder, so work it out once
-            self.raw = [entry_for(cfg, r) for r in rounds]            # the replay's own price (shown as "Best")
-            self.fixed = [with_gap(e, gap, self.cap) for e in self.raw]
+        if not self.side_mode:   # conditions mode: the entry doesn't depend on the ladder, so work it out once
+            if "raw" not in shared:
+                shared["raw"] = [entry_for(cfg, r) for r in rounds]   # the replay's own price (shown as "Best")
+                shared["fixed"] = [with_gap(e, gap, self.cap) for e in shared["raw"]]
+            self.raw, self.fixed = shared["raw"], shared["fixed"]
             if not any(self.fixed):
-                raise ValueError("No past round had an entry with these settings (e.g. the price never reached the "
-                                 "Hit price within Pay at most): nothing to simulate.")
+                raise ValueError("No past round had an entry with these settings (the conditions were never all met "
+                                 "within Price to): nothing to simulate.")
+        self._by_side: dict = shared.setdefault("by_side", {})
         self.skipped = 0
         self._jump()
 
@@ -198,10 +218,12 @@ class RealFeed:
             r = self.rounds[k]
             self.i += 1
             self.left_in_block -= 1
-            if self.side_mode:
+            if self.side_mode:                 # the side depends on the ladder or the last result
                 p = _price_at(r["h"], 0)
                 side = choose_side(self.cfg, lad, self.last_result, {"up": _ask(p), "down": _ask(1 - p)}, self.rng)
-                raw = entry_for(self.cfg, r, side)
+                if (k, side) not in self._by_side:   # the entry depends only on the round and the side wanted
+                    self._by_side[(k, side)] = entry_for(self.cfg, r, side)
+                raw = self._by_side[(k, side)]
                 e = with_gap(raw, self.gap, self.cap)
             else:
                 raw, e = self.raw[k], self.fixed[k]
@@ -252,7 +274,7 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
     terms: dict = {}                       # (base, step, owed, wins_left, price) -> (shares, cost)
 
     def sizing_for(step: int, base: float, left: float, carried: bool):
-        if not cfg.target_steps:
+        if not cfg.survive_steps:
             return cfg, 0.0
         if (step == 1 and not carried) or not base:
             key = int(left)
@@ -275,8 +297,9 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
     broke = skipped = 0
     paths = []
     every = max(1, bets // PATH_POINTS)
+    shared: dict = {}                      # the past rounds' entries, worked out once for all runs
     for run in range(runs):
-        feed = RealFeed(cfg, rounds, rng, gap) if rounds is not None else FairFeed(price, p_win, rng)
+        feed = RealFeed(cfg, rounds, rng, gap, shared) if rounds is not None else FairFeed(price, p_win, rng)
         lad = SimpleNamespace(rounds_bet=0, last_side="", last_won=None)     # what the Side mode looks at
         pnl = peak = worst_dd = 0.0
         step, owed, wins_left, base = 1, 0.0, 0, 0.0
@@ -364,6 +387,8 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
         "profit_chance": sum(f > 0 for f in finals) / runs,
         "ladder_end_chance": sum(e > 0 for e in ends_per_run) / runs,
         "ladder_ends_avg": statistics.fmean(ends_per_run),
+        "ladder_ends_median": statistics.median(ends_per_run), "ladder_ends_max": max(ends_per_run),
+        "ladder_ends_run1": ends_per_run[0],
         "broke_chance": broke / runs,
         "longest_streak_median": statistics.median(streaks), "longest_streak_max": max(streaks),
         "longest_streak_run1": streaks[0],
@@ -381,7 +406,7 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
 def history_summary(cfg, rounds: list, gap: float = 0.0) -> dict:
     """What the replay was based on: the rounds' span, and how the entries' prices and results came out per round
     (each past round once, whatever the ladder did)."""
-    side = getattr(cfg, "entry_mode", "side") == "side"
+    side = not ladder_free(cfg)
     cap = buy_cap(cfg)
     pairs = [(r, with_gap(entry_for(cfg, r, getattr(cfg, "first_side", "up")) if side else entry_for(cfg, r), gap, cap))
              for r in rounds]

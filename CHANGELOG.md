@@ -4,6 +4,247 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-16
+
+### Move condition on the 60-second TWAP, like Polymarket settles
+- **What:** the Move condition, the live "BTC now vs Price To Beat" and History's Move at bet now use Chainlink's
+  60-second TWAP, the price Polymarket settles on: the round's Price To Beat = the TWAP at its start, BTC now = the
+  TWAP now (spot only in the first minute after a restart, when the feed doesn't cover the window yet). The TWAP
+  is the mean of the per-second Chainlink price from 62 to 3 seconds before the moment (matches Polymarket's
+  eventMetadata to the cent on every gap-free round recorded). Move at bet is measured against the official TWAP
+  Price To Beat once Polymarket has published it. The simulation's Move condition uses the same TWAP (Binance 1 s
+  closes, with a minute before each round; coin paths are fetched again once). Research data: official settled
+  prices for the last 30 days (`polymarket-twap-<tf>.json`); rounds-*.csv's real result is now `result`/`twap_*`,
+  the old "official" (spot) columns are `spot_*`. Spot gives a different result in 11.2% of 5m rounds (6.1% 15m).
+- **Why:** the owner: "yes, do both" (official TWAP prices for the research, the Move condition on the TWAP), and
+  "480 bet - why bet up even price moved down?": Move at bet showed -$7.27 against the bot's spot Price To Beat
+  (64,634.92) while BTC was +$14.05 above the real TWAP one (64,613.60), so UP led at 0.77.
+- **How:** prices `TWAP_FROM`/`TWAP_TO`, `PriceFeed.twap()`, `twap_to_beat()`, `settle_prices()`; engine uses
+  settle_prices in `_enter_conditions` and `_buy`, the TWAP for `_coin_end` and the holding display, and watches the
+  coin in every `_enter`; history `twap_path()`, CoinPaths `"a"`, `PRE_SEC`; simulate reads `"a"`;
+  `moveTd(t, t.coin_at_bet, twap_beat || beat)`; data/research/tools/fetch_polymarket_twap.py, build_rounds.py.
+- **Tests:** test_prices_recorder `TwapTest` (window, gap -> spot fallback); test_conditions `test_twap_path`.
+
+### History: Move at bet and Move at end
+- **What:** two columns after Bet in each bot's History. **Move at bet** = the coin's live Chainlink (spot) price when
+  the bet was bought minus the spot price at the round's start (what the bot saw). **Move at end** = Polymarket's
+  official final price minus its official Price To Beat, the prices the round was settled on. Green = the bet's
+  side, red = against. Older bets get Move at end from Polymarket (looked up in the background like Volume) and
+  Move at bet from the research data (`data/research/tools/backfill_history.py`).
+- **Found while building it:** Polymarket settles these rounds on Chainlink's **BTC/USD TWAP** stream (60-second
+  average; the market's rules say so), published per round in the Gamma event's `eventMetadata`
+  (`priceToBeat`, `finalPrice`) once it has resolved. The live feed, the crypto-price endpoint and the bot's Price
+  To Beat are **spot** prices; on 30 days of rounds the spot start/end gave a different result in ~1 round in 10
+  (e.g. 12:55 ET on Nov 15: spot 64,520.59 -> 64,529.60 "up", TWAP 64,510.94 -> 64,505.31, paid Down). So the
+  Move condition and `data/research` "official_*" columns are spot, not what settles.
+- **Why:** the owner: "history table should show price move from start and end after "bet" column."
+- **How:** trades.py columns `beat`, `coin_at_bet`, `coin_end` (spot); `Bot._buy` stores the feed's price and Price
+  To Beat after the order; `_settle` logs them with `PriceFeed.close_price()`; `Polymarket.settled_prices()`;
+  `volume.RoundPrices` (data/round_prices.json, like RoundVolumes); `Controller.with_volume` adds `twap_beat`,
+  `twap_end`; `moveTd()` in index.html.
+- **Tests:** test_conditions `test_history_gets_the_coins_moves`; test_web
+  `test_history_shows_the_official_settled_prices`.
+
+### Two Bet modes: side and conditions (hit, time and move removed)
+- **What:** Bet mode is now **side** or **conditions** (the mixed mode below, renamed). hit, time and move are gone:
+  every bot and preset saved with them is converted, when it's loaded, to the conditions that bet the same:
+  hit = Price AND from the Hit price to Pay at most; time = Time left AND + Price AND from Leader at least to Pay at
+  most (no limits: Time alone, the leader); move = Move AND + Price AND up to Pay at most (Price off with no limit).
+  Alpaca (live, hit 0.75, no limit) became Price AND 0.75 to empty: the same bets. Pay at most, Hit price, Move ($),
+  Time left (s) and Leader at least are no longer settings. Waiting messages now say e.g. "UP costs 0.90, above
+  Price to 0.80" when the side the other conditions want is too dear.
+- **Why:** the owner: "make mode 2 types - "side" and "conditions". remove hit, time, move."
+- **How:** `config.upgrade()` (in `BotConfig`, `load_config`, `save_settings`, `App.presets`); `strategy`
+  `sides_allowed` (was mixed_sides), `leader_side`/`hit_side` removed, `entry_window` without the hit case;
+  engine `_enter_conditions` (was _enter_mixed), `_enter_move` and the hit/time branches removed; simulate
+  `_entry_conditions`, the hit/time/move replays removed (DEFAULT_GAP keeps their measured gaps for
+  `default_gap`); web `_own_bets` also matches which conditions are on.
+- **Tests:** test_conditions (was test_mixed) `UpgradeTest` (each old mode's conversion, an old config file upgraded
+  on load and save); test_engine's old hit/time/move tests now run old settings through the conversion and check
+  the same bets; test_web uses conditions; test_strategy's hit/time/move tests removed.
+
+### Simulation: ladder ends highlighted
+- **What:** the "Runs with a ladder end" tile became **🪜 Ladder ends per run** (the average, big and red, on a red
+  tile) with the typical run, the worst run, run 1 and the share of runs that had one; History (run 1) says how many
+  ladder ends it had (the red rows).
+- **Why:** the owner: "highlight ladder end counts on simulation."
+- **How:** simulate returns `ladder_ends_median`, `ladder_ends_max`, `ladder_ends_run1`; `.simstats > div.hl`.
+
+### Mixed Bet mode: AND/OR conditions
+- **What:** a new Bet mode **mixed** (renamed conditions, above): the owner's own combination of three conditions, each Off, **AND** (must be
+  true) or **OR** (one of the ORs is enough): **Time left** at most N s, **Move** at least $N from the Price To Beat
+  (the coin's live Chainlink price right now, not the highest it reached), **Price** of the side within from-to.
+  The bot bets a side when every AND condition is true for it and, if any condition is OR, at least one OR is
+  too. Move points to the way the coin moved, Price to the side(s) in range, Time to both; when both sides pass,
+  it bets the **leader** (the dearer side). No Side mode in mixed mode (the owner: "remove side mode"); the Side
+  mode list also gained **leader** for side mode. No Pay at most in mixed mode: **Price to** is
+  also the order's limit (the most it pays, so a fill can't slip above it), even for a bet from an OR Move; Price
+  off = no limit; empty Price from/to = 0.50/0.95 (the owner first asked for "blank
+  means any"; a simulation then showed 42% of bets going to the 0.02-0.10 losing side, winning ~1%, whenever the
+  favourite was above Price to, and the owner chose "blank price from means favourite only", then "0.5 to 0.95": empty Price from =
+  0.50, empty Price to = 0.95; both default to empty) (the owner: "pay at most and price to are same, aren't they? ... remove pay at most plz"). A new
+  conditions in the Mode & side card, one row each (Time left + Move, then Price; each condition's values only
+  while it's on; the owner: "these should be merged"), a
+  Conditions chip and Bet mode tile ("≤90s left AND move $10+ AND 0.75–0.95"). side/hit/time/move are unchanged,
+  so running bots (Alpaca is live in hit mode) behave exactly as before.
+- **Why:** the owner: "better to config settings as like add conditions, not like current mode - hit, move, time.
+  integrate these types into one - mixed ... time left 90s and move at least $10 and hit 0.75~0.95" and "every
+  condition can be set as OR or AND mode."
+- **How:** config `cond_time`/`cond_time_sec`, `cond_move`/`cond_move_usd`, `cond_price`/`cond_price_min`/
+  `cond_price_max`, `BotConfig.conditions()`, `mixed_mode`; strategy `mixed_sides()` (the one rule, used by the bot
+  and the simulation), `conditions_text()`, `entry_span`/`buy_cap`/`plan_price` for mixed, `choose_side` "leader";
+  `leader_of()`; engine `Bot._enter_mixed()`. Simulation: `simulate._entry_mixed()` checks every 2 s on the 1-minute token prices
+  and the coin's per-second position; `history.CoinPaths` now also keeps `"c"` (close − open of every candle) and
+  re-fetches rounds cached without it; `default_gap()` (mixed: hit's gap when Price is an AND, since the bot sees
+  the price before buying; else the biggest of its conditions' modes), each round's entries worked out once for
+  all runs (`RealFeed(shared=...)`, also faster for hit/time/move),
+  `needs_coin()`, `ladder_free()`.
+- **Tests:** tests/test_mixed.py (sides for AND, OR, AND+OR, time alone; window, cap, plan price; validation;
+  engine waits then bets, Side mode picks, Pay at most; simulation entry on the coin's position, price-only).
+
+### Chainlink price recorder and multi-coin live prices
+- **What:** the bot service now saves every Chainlink price Polymarket streams for BTC, ETH, SOL and XRP, one
+  second per row, in `data/research/chainlink/<coin>/<UTC day>.csv` (finished days gzipped), for research. Fixed:
+  the live price feed (move mode) only streamed live prices for one coin per connection, so move bots on two
+  coins at once would have left one without live prices.
+- **Why:** the owner: "save chainlink feed from now" and "fix the move mode feed too". Found while building the
+  recorder: a symbol-filtered subscription sends its backfill, then live prices for only one symbol.
+- **How:** `prices.Recorder` (own socket, unfiltered subscription `ALL`, each second written once and in order,
+  resumes after a restart from today's file); started in `hosted.serve_hosted`. `PriceFeed` subscribes `ALL` plus
+  the filtered ones (for their backfill) in one message and keeps only watched symbols.
+- **Tests:** tests/test_prices_recorder.py (order, dedupe, restart, day files and gzip, coin filter, feed keeps
+  watched coins). Checked live: BTC, ETH and SOL watched together all update every second.
+
+### Recover sizing: a short win no longer writes off the rest of the streak
+- **What:** with recover sizing a win now pays back only what it really earned over the Profit per win; a fill
+  dearer than planned (slippage) leaves the shortfall owed and the next bet is sized for it. Before, the planned
+  share was taken off what's owed whatever the win paid, so Alpaca (live) lost about $47 for good on 2026-11-16
+  (bet 445: sized at 0.81, filled at 0.891, +$65.17 instead of +$117.74). Alpaca's state was given back the $47.25.
+- **Why:** the owner: "why not recover loss after 2 streak loss? what's wrong?"
+- **How:** `Ladder.record(..., base_profit)`; the bet stores `base_profit` (the Profit per win it was sized for);
+  multiply sizing keeps the old behaviour.
+- **Tests:** test_engine `test_short_win_keeps_the_shortfall_owed` (the real numbers); `test_recover_over_two_wins`
+  allows the cent from rounding shares up.
+
+### Setting presets
+- **What:** **📚 Presets ▾** next to Save settings: "Save these settings as a preset…" stores the form as it is now
+  (saved or not) under a name; picking a preset loads it into the form (you check it and press Save settings), ✕
+  deletes one. New bot's Copy from lists presets too: a new paper bot with those settings. A preset is the strategy
+  only: not the bot's name, live/paper, Budget, Paper balance or keys, so loading one into a live bot never changes
+  how much money it may use. Kept per user (up to 100). The save bar says "✓ Saved" / "Unsaved".
+  The menu also has **Load settings from a bot**: any of your other bots' settings into the form the same way (not
+  its name, live/paper, money or keys), and New bot's Copy from says how to save one while there are none (the
+  owner: "how can i input saved setting preset? ... i can't find ... can't see about existing bot as well").
+- **Why:** the owner: "plz make save setting feature." (chose named presets)
+- **How:** `App.presets()`, `save_preset()`, `delete_preset()`, `create(preset=...)`; `GET/POST /api/presets`,
+  `POST /api/presets/delete`; `profiles/.presets.json`; `presetMenu()` in index.html.
+- **Tests:** test_web `test_setting_presets`.
+
+### Settings cards: 4 or fewer settings fill one row
+- **What:** a settings card showing 4 settings or fewer puts them in one full-width row (Bet size 3 or 4, time
+  mode's Mode & side 4, Loss recovery 2); a lone setting takes half the width. A card with more fills 2 even rows:
+  Market & money is Bot name, Network, Paper balance (Budget when live) / Coin, Round length, Until earn (Bot name
+  no longer takes 2 columns; the owner: "market setting should have only 2 rows").
+- **Why:** the owner: "bet size can be 3 or 4, if needed. full width plz." and "for time mode, 3 or 4 columns at a
+  row, if it need."
+- **How:** `.card-body.fit` with `--cols`, set in `showFields()` from the shown fields; `WIDE` is empty.
+
+### Steps to survive: side mode only
+- **What:** Steps to survive is shown and used in side mode only. In hit, time and move mode the bot buys at
+  0.75-0.99 a share, so each ladder step costs ~4-20x the last: fitting several steps into the budget leaves a tiny
+  first bet, or none. There the bet is sized by Profit per win (recover) or Starting bet (multiply) as set. A value
+  saved before is kept and counts again in side mode (Hawk, a new hit-mode paper bot with no bets yet, had 5).
+- **Why:** the owner: "i think 'steps to survive' need for only side mode."
+- **How:** `BotConfig.survive_steps` (side only) used by `streak_sizing`, the engine, simulate and the ladder view;
+  `showFields()` / the summary in index.html.
+- **Tests:** test_engine `test_steps_to_survive_is_side_mode_only`.
+
+### Paper bots: the Paper balance is the budget (no Budget setting)
+- **What:** Budget is shown and used for live bots only. A paper bot has its own paper account, so its Paper balance
+  is all it can lose; its settings summary shows Paper balance instead of Budget. A Budget saved before is kept and
+  counts again if the bot is switched to live (no paper bot had one set).
+- **Why:** the owner: "for paper bot, need budget input? ... just paper balance enough."
+- **How:** `BotConfig.budget` (live only) used by `Bot.budget_left()`, `Bot.own_balance()`, `Controller._budget()`
+  and the bot list; `budgetOf()` and `showFields()` in index.html.
+- **Tests:** test_engine budget tests use the Paper balance; test_web checks a paper bot ignores a saved Budget and
+  keeps it for live.
+
+### Compact settings: 3 settings a row
+- **What:** the settings cards fit 3 settings a row (4+ on a wider column) instead of 2, with tighter spacing and
+  smaller labels (a long one wraps to 2 lines, the boxes stay lined up). Bot name takes 2 columns; a setting's help floats
+  under it while you edit it instead of pushing the row down.
+- **Why:** the owner: "plz compact settings cards, it doesn't need to only 2 input at a row."
+- **Bet size** fits 4 settings a row (the owner: "let bet size setting has 4 columns at a row").
+- **How:** `.card-body` grid `minmax(104px, 1fr)`, `.card.tone-target` 4 columns, each field a CSS subgrid (label / box / note rows, so boxes line up), `.field` CSS, a focusin handler in `buildForm()`.
+- **Tests:** none (page only).
+
+### Duplicate a bot: settings and Polymarket keys copied
+- **What:** a **⧉ Duplicate** button on each bot, and a **Copy from** choice in New bot. The new bot gets that bot's
+  settings (network included) and its Polymarket keys, so a new live bot needs no keys typed again; coin and round
+  length start the same and can be changed; it gets its own name, a fresh ladder, paper account and empty history,
+  and starts stopped. Only your own bots can be copied.
+- **Why:** the owner: "i need to enter api key and private key for new live bot every times. plz let me make as
+  duplicate with existing one."
+- **How:** `App.create(copy_from=...)` copies the settings and the bot's `.env` (encrypted as saved, mode 600);
+  `newBotDlg()` in index.html.
+- **Tests:** test_web `test_duplicate_copies_settings_and_keys`.
+
+### Wins / Losses counts every bet; since Reset in small
+- **What:** the ✅ Wins / ❌ Losses tile shows every bet in History (Resets don't clear it), with "since Reset W / L"
+  under it when that differs. The bot list keeps the since-Reset count.
+- **Why:** the owner: "wins/losses count card show about total bets regardless about reset. show small info about
+  after reset then."
+- **How:** status `all_wins` / `all_losses` (counted from the trade log); the tile in index.html.
+- **Tests:** test_web `test_history_has_every_bet` checks the totals after a Reset.
+
+### Win chance now: only its own box is coloured
+- **What:** while a bet runs, the green/red background and stripe now cover only the "Win chance now" box, not the
+  Up/Down bar beside it.
+- **Why:** the owner: "background color reflection for only show about first div. not about status bar's."
+- **How:** `.winnow .wn` in index.html (`winNow()`).
+- **Tests:** none (page only).
+
+### A bot without a Budget counts its open bet in its Balance too
+- **What:** the 💰 Balance of a bot with no Budget was the account's cash only, so it dropped by the bet's cost
+  while a bet ran. It's now cash + this bot's open bet at what it's worth now (moves with the price, checked every
+  5 s), with "cash $X · in bet $Y" under it; also in the bot list. Live no-Budget bots: the tile is "Balance" (was
+  "pUSD balance"). Budget bots already did this.
+- **Why:** the owner: "why balance card not reflect current's bet's balance?" (time mode: $160.30 shown = cash
+  after a $10.75 bet worth $13.25).
+- **How:** `Bot.own_balance()`; the balance tile in index.html.
+- **Tests:** test_web `test_budget_bot_shows_its_own_balance` checks a no-budget bot with an open bet.
+
+### "reset" never stops the bot at step 1: it waits for a round it can pay
+- **What:** with When the ladder ends = reset, a step 1 bet that costs more than the bot has left (or a budget too
+  small for Steps to survive) no longer stops the bot. It skips that round and keeps checking ("Can't pay this
+  round: ... Waiting for a round where the step 1 bet fits"), and bets as soon as one fits (in time/hit mode the
+  cost follows the price, so a cheaper round comes). A bot already stopped this way starts again with Start, no
+  Reset needed. With stop, nothing changes.
+- **Why:** the owner: "this bot stopped at step1 due to lack of balance. then plz wait till can cover with its
+  balance for next round. don't stop as far as setting is 'reset'." (Salmon, paper $616, time mode: step 1 cost
+  $764 at that round's price.)
+- **How:** `Bot.waits_at_step1()`; `_ladder_end()` waits instead of halting; `_buy()` (Steps to survive) and
+  `on_start()`; the help of `FIELDS["on_ladder_end"]`.
+- **Tests:** test_engine `test_reset_mode_waits_at_step1_when_short`, `test_reset_mode_start_works_after_an_old_step1_stop`;
+  two stop-mode tests now set stop themselves.
+
+### History shows each round's volume
+- **What:** a **Volume** column after Round: everything traded in that round (USDC), Polymarket's final number. It
+  shows – until the round has been over for 10 minutes and the number is fetched (a moment after the page loads,
+  for old bets). The CSV download has a `volume` column too.
+- **Why:** the owner: "can you show volume of each round on history table?"
+- **Fix (same day):** a few rounds showed $0.00: Gamma leaves their volume out (`volume: null`). Those now come from
+  Polymarket's data API (`v2/live-volume`, the same number to the cent where both have it), and $0 is never saved
+  (asked again later); saved zeros are dropped on start.
+- **Fix 2 (same day):** the newest rounds showed far too little (bet 501: $1.96 instead of $39.2k): Gamma's volume
+  still lags 20+ minutes after a round ends. The data API (`v2/live-volume`) is now the main source (complete
+  after the round; matches Gamma to the cent once Gamma catches up) and Gamma only the fallback. The saved
+  volumes were cleared and fetched again.
+- **How:** `Polymarket.final_volume()`; `volume.RoundVolumes` (the volume per round slug, looked up in a background thread, kept in
+  `data/round_volumes.json` and shared by every bot); `Polymarket.round_volumes`; `Controller.with_volume()` adds
+  it to status and history trades; the trade log file is unchanged.
+- **Tests:** test_web `test_history_shows_each_rounds_volume`.
+
 ## [1.3.0] - 2026-11-14
 
 ### Recover over (wins) shows a recommended value

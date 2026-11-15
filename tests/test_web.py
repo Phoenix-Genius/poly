@@ -27,19 +27,22 @@ class AppTest(unittest.TestCase):
     def test_reset_and_settings_logged_for_history(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
-        ctl.put_settings({"entry_mode": "hit", "hit_price": 0.7})
-        ctl.put_settings({"hit_price": 0.7})                      # nothing changed: nothing logged
+        ctl.put_settings({"entry_mode": "conditions", "cond_time": "off", "cond_move": "off", "cond_price_min": 0.7})
+        ctl.put_settings({"cond_price_min": 0.7})                 # nothing changed: nothing logged
         ctl.reset()
         ev = ctl.status()["events"]
         self.assertEqual([e["kind"] for e in ev], ["settings", "reset"])
-        self.assertIn("Bet mode side → hit", ev[0]["text"])
-        self.assertIn("Hit price 0.75 → 0.7", ev[0]["text"])
+        self.assertIn("Bet mode side → conditions", ev[0]["text"])
+        self.assertIn("Price from 0 → 0.7", ev[0]["text"])
         self.assertIn("was step 1", ev[1]["text"])
 
     def test_budget_bot_shows_its_own_balance(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
         s = ctl.put_settings({"budget_usd": 200})
+        self.assertEqual((s["balance"], s["wallet"]), (1000, 1000))      # paper: no Budget, its Paper balance is it
+        ctl.bot.cfg.network = "live"                                     # live (with the paper client: no network)
+        s = ctl.status()
         self.assertEqual((s["balance"], s["wallet"]), (200, 1000))       # its budget, not the whole account
         ctl.bot.ladder.pnl = 12.5
         ctl.bot.bet = {"slug": "x", "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8, "cost": 8.1,
@@ -49,7 +52,61 @@ class AppTest(unittest.TestCase):
         self.assertAlmostEqual(ctl.status()["balance"], 200 + 12.5 + 10 * 0.9 - 8.1, places=2)
         ctl.bot.live = {}
         ctl.bot.bet = None
+        ctl.bot.cfg.network = "paper"
         self.assertEqual(ctl.put_settings({"budget_usd": 0})["balance"], 1000)   # no budget: the account
+        ctl.bot.bet = {"slug": "x", "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8, "cost": 8.1,
+                       "fee": 0.1, "start": 1.8e9, "end": 1.8e9 + 300, "url": "u", "token": "x"}
+        ctl.bot.live = {"mid": 0.95}
+        s = ctl.status()                                                     # no budget: cash + the open bet now
+        self.assertAlmostEqual(s["balance"], s["wallet"] + 10 * 0.95, places=2)
+
+    def test_duplicate_copies_settings_and_keys(self):
+        from poly_bot.live import read_keys, save_keys
+        from poly_bot.trades import append_trade
+        self.app.create({"coin": "BTC", "timeframe": "5m", "name": "Pelican"})
+        src = self.app.get("pelican")
+        src.put_settings({"entry_mode": "conditions", "cond_time_sec": 120, "budget_usd": 500, "network": "live"})
+        save_keys(src.folder, {"private_key": "ab" * 32, "wallet": "0x" + "1" * 40, "relayer_key": "rk",
+                               "relayer_address": "0x" + "2" * 40})
+        append_trade(src.cfg.trade_log, {"time": "2026-11-14 00:00:00", "round": "r", "side": "up", "result": "up"})
+        d = self.app.create({"copy_from": "pelican", "name": "Pelican 2"})
+        new = self.app.get(d["id"])
+        self.assertEqual((new.cfg.entry_mode, new.cfg.cond_time_sec, new.cfg.budget_usd, new.cfg.network, new.cfg.coin),
+                         ("conditions", 120, 500, "live", "BTC"))
+        self.assertEqual(new.cfg.display_name, "Pelican 2")
+        self.assertEqual(read_keys(new.folder), read_keys(src.folder))            # no need to type the keys again
+        self.assertEqual(oct((new.folder / ".env").stat().st_mode & 0o777), "0o600")
+        self.assertEqual(new.status()["trade_count"], 0)                          # a fresh history
+        with self.assertRaises(LookupError):
+            self.app.create({"copy_from": "nobody"})
+
+    def test_setting_presets(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m", "name": "Pelican"})
+        src = self.app.get("pelican")
+        src.put_settings({"entry_mode": "conditions", "cond_time_sec": 90, "budget_usd": 300, "network": "live"})
+        out = self.app.save_preset({"name": "time 90", "settings": {**src.cfg.settings(), "bot_name": "x"}})
+        p = out["presets"]["time 90"]
+        self.assertEqual((p["entry_mode"], p["cond_time_sec"]), ("conditions", 90))
+        for k in ("bot_name", "network", "budget_usd", "paper_balance_usd"):     # not the name, live/paper or money
+            self.assertNotIn(k, p)
+        with self.assertRaises(ValueError):
+            self.app.save_preset({"name": "bad", "settings": {"multiplier": 0.5}})  # checked like a bot's settings
+        with self.assertRaises(ValueError):
+            self.app.save_preset({"name": " ", "settings": {}})
+        d = self.app.create({"preset": "time 90", "name": "From preset"})          # a new bot from it: paper
+        new = self.app.get(d["id"])
+        self.assertEqual((new.cfg.entry_mode, new.cfg.cond_time_sec, new.cfg.network, new.cfg.budget_usd),
+                         ("conditions", 90, "paper", 0))
+        self.assertFalse((new.folder / ".env").exists())                          # no keys from a preset
+        again = App(Path(self.tmp.name) / "profiles", self.pm)                   # kept on disk
+        self.assertIn("time 90", again.presets()["presets"])
+        again.stop_all()
+        for c in again.controllers.values():
+            if c.lock:
+                c.lock.close()
+        self.assertEqual(self.app.delete_preset({"name": "time 90"})["presets"], {})
+        with self.assertRaises(LookupError):
+            self.app.create({"preset": "time 90"})
 
     def test_history_has_every_bet(self):
         from poly_bot.trades import append_trade
@@ -63,9 +120,55 @@ class AppTest(unittest.TestCase):
         ctl.reset()
         s = ctl.status()
         self.assertEqual((len(s["trades"]), s["trade_count"]), (100, 130))      # the 2 s status: newest 100
+        self.assertEqual((s["all_wins"], s["all_losses"], s["wins"], s["losses"]), (130, 0, 0, 0))   # total vs since Reset
         h = ctl.history()
         self.assertEqual((len(h["trades"]), h["trades"][0]["round"], h["trades"][-1]["round"]), (130, "r129", "r0"))
         self.assertEqual([e["kind"] for e in h["events"]], ["reset"])
+
+    def test_history_shows_each_rounds_volume(self):
+        from poly_bot.trades import append_trade
+        from poly_bot.volume import RoundVolumes
+        self.pm.round_volumes = rv = RoundVolumes(self.pm, Path(self.tmp.name) / "round_volumes.json", self.pm.clock)
+        real_round = self.pm.round
+        self.pm.round = lambda slug: (lambda r: (setattr(r, "volume", 1234.567), r)[1])(real_round(slug))
+        rv.get = (lambda get: lambda slugs: (get(slugs), rv.fill_now(), get(slugs))[2])(rv.get)   # no thread
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        now = int(self.pm.clock())
+        for start in (now - 3600, now - 300):       # an old round, and one that ended too recently to be final
+            append_trade(ctl.cfg.trade_log, {"time": "2026-11-14 00:00:00", "round": f"btc-updown-5m-{start}",
+                                             "title": "t", "side": "up", "step": 1, "shares": 10, "price": 0.8,
+                                             "cost": 8, "fee": 0.1, "result": "up", "payout": 10, "pnl": 2,
+                                             "total_pnl": 2, "balance": 1000})
+        self.assertEqual([t["volume"] for t in ctl.status()["trades"]], ["", 1234.57])
+        self.assertEqual([t["volume"] for t in ctl.history()["trades"]], ["", 1234.57])
+        self.pm.round = lambda slug: (lambda r: (setattr(r, "volume", 0.0), r)[1])(real_round(slug))
+        old2 = f"btc-updown-5m-{now - 7200}"                     # Polymarket has no number (yet): "", not $0
+        self.assertEqual(rv.get([old2]), {})
+        self.assertNotIn(old2, json.loads((Path(self.tmp.name) / "round_volumes.json").read_text()))
+        again = RoundVolumes(self.pm, Path(self.tmp.name) / "round_volumes.json")        # kept on disk
+        self.assertEqual(again.get([f"btc-updown-5m-{now - 3600}"]), {f"btc-updown-5m-{now - 3600}": 1234.57})
+
+    def test_history_shows_the_official_settled_prices(self):
+        from poly_bot.trades import append_trade
+        from poly_bot.volume import RoundPrices
+        self.pm.round_prices = rp = RoundPrices(self.pm, Path(self.tmp.name) / "round_prices.json", self.pm.clock)
+        now = int(self.pm.clock())
+        settled = {f"btc-updown-5m-{now - 3600}": (64510.94, 64505.31)}            # resolved; the other isn't yet
+        self.pm.settled_prices = lambda slug: (*settled.get(slug, (None, None)), int(slug.rsplit("-", 1)[1]) + 300)
+        rp.get = (lambda get: lambda slugs: (get(slugs), rp.fill_now(), get(slugs))[2])(rp.get)   # no thread
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        for start in (now - 3600, now - 600):
+            append_trade(ctl.cfg.trade_log, {"time": "2026-11-14 00:00:00", "round": f"btc-updown-5m-{start}",
+                                             "title": "t", "side": "down", "step": 1, "shares": 10, "price": 0.8,
+                                             "cost": 8, "fee": 0.1, "result": "down", "payout": 10, "pnl": 2,
+                                             "total_pnl": 2, "balance": 1000, "beat": 64520.59, "coin_at_bet": 64500})
+        rows = ctl.history()["trades"]
+        self.assertEqual([(t["twap_beat"], t["twap_end"]) for t in rows], [("", ""), (64510.94, 64505.31)])
+        self.assertEqual(rows[1]["coin_at_bet"], "64500")                        # the spot price the bot saw
+        again = RoundPrices(self.pm, Path(self.tmp.name) / "round_prices.json")     # kept on disk
+        self.assertEqual(again.get(list(settled)), {k: list(v) for k, v in settled.items()})
 
     def test_reset_only_ladder_keeps_profit_and_counts(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
@@ -83,7 +186,8 @@ class AppTest(unittest.TestCase):
     def test_ladder_shows_the_open_bet_as_placed(self):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
-        ctl.put_settings({"entry_mode": "hit", "hit_price": 0.75, "base_profit_usd": 2})
+        ctl.put_settings({"entry_mode": "hit", "hit_price": 0.75, "hit_max_price": 0.8,     # an old mode is converted
+                          "base_profit_usd": 2})                   # (Price 0.75-0.80; the bet filled dearer, at 0.83)
         lad = ctl.bot.ladder
         lad.step, lad.streak_lost = 2, 15.83
         ctl.bot.bet = {"slug": "btc-updown-5m-1800000000", "title": "t", "side": "down", "step": 2,
@@ -150,7 +254,7 @@ class AppTest(unittest.TestCase):
 
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
-        form = {"entry_mode": "time", "time_left_sec": 120}
+        form = {"entry_mode": "conditions", "cond_time": "and", "cond_time_sec": 120, "cond_move": "off", "cond_price": "off"}
         with mock.patch("poly_bot.web.History", FakeHistory):
             r = ctl.simulate({"bets": 100, "runs": 10, "bankroll": 300, "settings": form})
         self.assertEqual((r["bankroll"], r["mode"]), (300, "real"))
@@ -189,7 +293,8 @@ class AppTest(unittest.TestCase):
         self.app.create({"coin": "BTC", "timeframe": "5m"})
         ctl = self.app.get("btc-5m")
         with mock.patch("poly_bot.web.History", FakeHistory):
-            r = ctl.simulate({"bets": 50, "runs": 20, "settings": {"entry_mode": "time", "time_left_sec": 120}})
+            r = ctl.simulate({"bets": 50, "runs": 20, "settings": {"entry_mode": "conditions", "cond_time_sec": 120,
+                                                                   "cond_move": "off", "cond_price": "off"}})
         self.assertEqual(r["mode"], "real")
         self.assertEqual(r["p_win"], 1.0)                        # the leader 2 min before the end always won here
         self.assertGreater(r["price"], 0.7)                      # bought at the leader's real price, not 0.75 flat
@@ -245,7 +350,8 @@ class AppTest(unittest.TestCase):
         self.assertNotIn("k-secret", json.dumps(s))
         self.assertNotIn("ab" * 32, json.dumps(s))
         s = ctl.put_settings({"network": "paper"})
-        self.assertEqual((s["wallet"], s["balance"]), (1000, 50))          # the account, and the bot's budget
+        self.assertEqual((s["wallet"], s["balance"]), (1000, 1000))        # paper: its Paper balance, Budget unused
+        self.assertEqual(s["settings"]["budget_usd"], 50)                  # but kept for when it goes live again
 
     def test_missing_timeframe_refused(self):
         self.pm.missing.add(("SOL", "daily"))

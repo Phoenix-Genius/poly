@@ -21,8 +21,8 @@ from typing import Callable, Optional
 
 from .config import BotConfig, write_json
 from .markets import MarketError, Polymarket
-from .strategy import (Ladder, buy_cap, choose_side, cost_of, entry_span, hit_side, leader_side, shares_for_book,
-                       streak_sizing, walk_asks)
+from .strategy import (Ladder, buy_cap, choose_side, conditions_text, cost_of, entry_span, leader_of, sides_allowed,
+                       shares_for_book, streak_sizing, walk_asks)
 from .trades import append_trade
 
 SETTLE_CHECK_SEC = 10          # how often to ask whether an ended round has resolved
@@ -91,7 +91,7 @@ class Bot:
         self.log.info("Reset: fresh ladder at step 1%s", " (profit and counts kept)" if keep_counts else "")
 
     def on_start(self) -> None:
-        if self.halted == "ladder":
+        if self.halted == "ladder" and not self.waits_at_step1():
             raise ValueError(f"{self.halt_message} Press Reset to start a new ladder.")
         if self.target_reached():
             raise ValueError(f"Already earned ${self.ladder.pnl:.2f} since Reset, the Until earn target of "
@@ -100,12 +100,17 @@ class Bot:
         self.halted, self.halt_message, self.stop_after_win = "", "", False
         self.save()
 
+    def waits_at_step1(self) -> bool:
+        """When the ladder ends = reset and the bot is at step 1: a bet it can't pay is skipped (it waits for a round
+        where the bet fits) instead of stopping, as there is no streak to give up."""
+        return self.cfg.on_ladder_end == "reset" and self.ladder.step == 1
+
     # --- numbers -----------------------------------------------------------------------------------------
     def budget_left(self) -> float:
         """What the next bet may cost: the budget plus profit since Reset (capped by the balance)."""
         bal = self.client.balance()
-        if self.cfg.budget_usd > 0:
-            return max(0.0, min(bal, self.cfg.budget_usd + self.ladder.pnl))
+        if self.cfg.budget > 0:
+            return max(0.0, min(bal, self.cfg.budget + self.ladder.pnl))
         return bal
 
     def bet_value(self) -> float:
@@ -119,20 +124,20 @@ class Bot:
     def own_balance(self, wallet: Optional[float] = None) -> Optional[float]:
         """The bot's balance as shown: with a Budget, its own money (Budget + profit since Reset, with the open bet
         at what it's worth now, so it moves with the price), so several bots on one account each show only theirs;
-        without one, the account's balance."""
-        if self.cfg.budget_usd > 0:
+        without one, the account's cash plus this bot's open bet at what it's worth now (the cash already paid for it)."""
+        if self.cfg.budget > 0:
             open_now = self.bet_value() - self.bet["cost"] if self.bet else 0.0
-            return max(0.0, self.cfg.budget_usd + self.ladder.pnl + open_now)
-        return self.client.balance() if wallet is None else wallet
+            return max(0.0, self.cfg.budget + self.ladder.pnl + open_now)
+        return (self.client.balance() if wallet is None else wallet) + self.bet_value()
 
     def sizing(self):
         """The sizing for the next bet (see strategy.streak_sizing); remembers a new streak's Steps-to-survive bet."""
         cfg, lad = self.cfg, self.ladder
         sizing, base = streak_sizing(cfg, lad.step, lad.base, self.budget_left(), lad.streak_lost > 0)
-        if sizing is not None and cfg.target_steps and base != lad.base:
+        if sizing is not None and cfg.survive_steps and base != lad.base:
             lad.base = base
             self.log.info("Steps to survive %d: %s $%.2f for this streak (budget left $%.2f, at price %.2f)",
-                          cfg.target_steps, "Profit per win" if cfg.sizing == "recover" else "Starting bet",
+                          cfg.survive_steps, "Profit per win" if cfg.sizing == "recover" else "Starting bet",
                           base, self.budget_left(), buy_cap(cfg))
         return sizing
 
@@ -146,10 +151,8 @@ class Bot:
     # --- loop --------------------------------------------------------------------------------------------
     def run(self, stop: threading.Event) -> None:
         self.log.info("Started: %s %s rounds, %s sizing, %s, step %d", self.cfg.coin, self.cfg.timeframe,
-                      self.cfg.sizing, f"hit {self.cfg.hit_price:.2f} (pay at most {buy_cap(self.cfg):.2f})"
-                      if self.cfg.hit_mode else f"leader with {fmt_secs(self.cfg.time_left_sec)} left"
-                      if self.cfg.time_mode else f"move ${self.cfg.move_usd:g} from the Price To Beat"
-                      if self.cfg.move_mode else f"side {self.cfg.side_mode}", self.ladder.step)
+                      self.cfg.sizing, f"conditions: {conditions_text(self.cfg)} (pays at most {buy_cap(self.cfg):.2f})"
+                      if self.cfg.conditions_mode else f"side {self.cfg.side_mode}", self.ladder.step)
         while not stop.is_set() and not self.halted:
             try:
                 self.tick()
@@ -187,9 +190,13 @@ class Bot:
         self.save()
         self.log.warning(message)
 
-    def _ladder_end(self, why: str) -> None:
+    def _ladder_end(self, why: str, key: str = "") -> None:
         """The next bet can't be paid: stop, or (When the ladder ends = reset) accept the loss and go back to step 1.
-        Either way it's logged in History."""
+        Either way it's logged in History. At step 1 with reset there's nothing to give up: wait for a round where
+        the bet fits (the price, so the cost, changes from round to round)."""
+        if self.waits_at_step1():
+            return self._wait(f"Can't pay this round: {why} Waiting for a round where the step 1 bet fits "
+                              f"(When the ladder ends = reset).", key=key or f"short:{why}", level=logging.WARNING)
         if self.cfg.on_ladder_end == "reset" and self.ladder.step > 1:
             self.log.warning("%s Ladder end: accepting the streak's loss of $%.2f and starting again at step 1.",
                              why, self.ladder.streak_lost)
@@ -220,8 +227,9 @@ class Bot:
                 mid = self.pm.midpoint(bet["token"])
                 self.live = {**self.live, "mid": mid, "next": now + 5}
             pf = getattr(self.pm, "coin_prices", None)
-            if pf is not None and pf.available and bet.get("price_to_beat"):   # move mode: the coin vs the beat
-                self.live["coin_price"] = pf.price(self.cfg.coin)
+            if pf is not None and pf.available and bet.get("price_to_beat"):   # the coin vs the beat (60 s TWAP)
+                twap = pf.twap(self.cfg.coin) if hasattr(pf, "twap") else None
+                self.live["coin_price"] = twap if twap is not None else pf.price(self.cfg.coin)
             feed = getattr(self.pm, "volumes", None)
             v = feed.volume(bet["slug"]) if feed else None
             if v:                                          # real time, from Polymarket's trade stream
@@ -246,6 +254,18 @@ class Bot:
             return
         self._settle(r.result)
 
+    def _coin_end(self, bet: dict) -> Optional[float]:
+        """The coin's Chainlink price at the bet's round end, for History (None if unknown)."""
+        feed = getattr(self.pm, "coin_prices", None)
+        if feed is None or not getattr(feed, "available", False) or not bet.get("price_to_beat"):
+            return None
+        try:
+            twap = feed.twap(self.cfg.coin, bet["end"]) if hasattr(feed, "twap") else None
+            return twap if twap is not None else feed.close_price(self.cfg.coin, bet["start"], bet["end"],
+                                                                  self.cfg.timeframe)
+        except Exception:  # noqa: BLE001 - only for the page
+            return None
+
     def settle_ended(self) -> bool:
         """Settle the open bet now if its round has ended and Polymarket has its result (used while stopped)."""
         if not self.bet or self.clock() < self.bet["end"]:
@@ -261,7 +281,9 @@ class Bot:
         payout = self.client.settle(bet["slug"], result)
         won = result == bet["side"]
         profit = round(payout - bet["cost"], 6)
-        self.ladder.record(bet["side"], won, profit, self.cfg.recover_wins if self.cfg.sizing == "recover" else 1)
+        recover = self.cfg.sizing == "recover"
+        base = bet.get("base_profit", self.cfg.base_profit_usd) if recover else None
+        self.ladder.record(bet["side"], won, profit, self.cfg.recover_wins if recover else 1, base)
         self.bet, self.live, self._slow_warned = None, {}, False
         self.save()
         append_trade(self.cfg.trade_log, {
@@ -274,7 +296,9 @@ class Bot:
             "held_sec": int(self.clock() - bet["placed"]) if bet.get("placed") else "",
             "best_price": bet.get("best_price", ""),
             "slippage": round(max(0.0, bet["price"] - bet["best_price"]) * bet["shares"], 4)
-            if bet.get("best_price") else ""})
+            if bet.get("best_price") else "",
+            "beat": bet.get("price_to_beat") or "", "coin_at_bet": bet.get("coin_at_bet") or "",
+            "coin_end": self._coin_end(bet) or ""})
         self.log.info("%s %s: bet %s at %.3f, round went %s, %s$%.2f (total %s$%.2f)",
                       "WIN " if won else "LOSS", bet["title"], bet["side"].upper(), bet["price"], result.upper(),
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
@@ -299,6 +323,9 @@ class Bot:
         cur, nxt = self.pm.current_round(cfg.coin, cfg.timeframe)
         later = f"next round starts in {fmt_secs(nxt.start - now)}" if nxt else "waiting for the next round"
         self.live = {"next_start": nxt.start if nxt else None}
+        coins = getattr(self.pm, "coin_prices", None)
+        if coins is not None and getattr(coins, "available", False):
+            coins.watch(cfg.coin)      # the coin's prices from before each round starts: its TWAP Price To Beat
         feed = getattr(self.pm, "volumes", None)
         if feed:                       # count both rounds' trades from before they start, for the page
             feed.watch(cur)
@@ -318,21 +345,8 @@ class Bot:
             return self._wait(f"{cur.title} isn't taking orders; {later}", key=f"closed:{cur.slug}")
         last, cap = None, buy_cap(cfg)
         prices = self.pm.best_asks(cur)
-        if cfg.hit_mode:               # whichever side first reaches the Hit price
-            side, why = hit_side(cfg, prices)
-            if side is None:
-                return self._wait(f"Waiting for a side to reach {cfg.hit_price:.2f}: {why} (window ends in "
-                                  f"{fmt_secs(window - elapsed)})", key=f"hit:{cur.slug}")
-            price = prices[side]
-            return self._buy(cur, side, price, cap, last, now, window - elapsed)
-        if cfg.move_mode:              # the coin moved Move ($) from the Price To Beat: bet that way
-            return self._enter_move(cur, prices, cap, now, window - elapsed)
-        if cfg.time_mode:              # the side leading when Time left is reached
-            side, why = leader_side(cfg, prices)
-            if side is None:
-                return self._wait(f"Not betting yet: {why}; checking until 5s before the end (in "
-                                  f"{fmt_secs(window - elapsed)})", key=f"lead:{cur.slug}")
-            return self._buy(cur, side, prices[side], cap, last, now, window - elapsed)
+        if cfg.conditions_mode:        # the owner's own AND/OR conditions
+            return self._enter_conditions(cur, prices, cap, now, window - elapsed)
         if cfg.side_mode in ("follow_last", "opposite_last"):
             found = self.pm.last_result(cfg.coin, cfg.timeframe)
             last = found[1] if found else None
@@ -347,32 +361,35 @@ class Bot:
                               f"(window ends in {fmt_secs(window - elapsed)})", key=f"cheap:{cur.slug}:{side}")
         return self._buy(cur, side, price, cap, last, now, window - elapsed)
 
-    def _enter_move(self, cur, prices: dict, cap: float, now: float, window_left: float) -> None:
-        cfg, feed = self.cfg, getattr(self.pm, "coin_prices", None)
-        if feed is None or not feed.available:
-            return self._wait("Move mode needs the live price feed (the websockets package); it isn't available.",
-                              key="nofeed", level=logging.WARNING)
-        feed.watch(cfg.coin)
-        price_now = feed.price(cfg.coin)
-        beat = feed.price_to_beat(cfg.coin, cur, cfg.timeframe)
-        self.live.update(coin_price=price_now, price_to_beat=beat)
-        if price_now is None or beat is None:
-            return self._wait(f"Waiting for {'the live ' + cfg.coin + ' price' if price_now is None else 'the Price To Beat'}"
-                              f" of {cur.title}", key=f"moveprice:{cur.slug}")
-        diff = price_now - beat
-        if abs(diff) < cfg.move_usd:
-            return self._wait(f"{cfg.coin} ${price_now:,.2f} is ${abs(diff):,.2f} {'above' if diff >= 0 else 'below'} "
-                              f"the Price To Beat ${beat:,.2f}; betting at ${cfg.move_usd:,.0f} (window ends in "
-                              f"{fmt_secs(window_left)})", key=f"move:{cur.slug}")
-        side = "up" if diff > 0 else "down"
+    def _enter_conditions(self, cur, prices: dict, cap: float, now: float, window_left: float) -> None:
+        """Bet the side the conditions allow (strategy.sides_allowed); the leader when both are allowed."""
+        cfg, conds = self.cfg, self.cfg.conditions()
+        move = beat = None
+        if "move" in conds:
+            feed = getattr(self.pm, "coin_prices", None)
+            if feed is None or not feed.available:
+                return self._wait("The Move condition needs the live price feed (the websockets package); it isn't "
+                                  "available.", key="nofeed", level=logging.WARNING)
+            feed.watch(cfg.coin)
+            price_now, beat, exact = feed.settle_prices(cfg.coin, cur, cfg.timeframe)   # 60 s TWAPs, like settling
+            self.live.update(coin_price=price_now, price_to_beat=beat, twap=exact)
+            if price_now is not None and beat is not None:
+                move = price_now - beat
+        sides, why = sides_allowed(cfg, cur.end - now, move, prices)
+        if not sides:
+            return self._wait(f"Waiting: {why} (checking until 5 s before the end, in {fmt_secs(window_left)})",
+                              key=f"cond:{cur.slug}")
+        side = leader_of(sides, prices)
         price = prices.get(side)
         if price is None or price > cap + 1e-9:
-            return self._wait(f"{cfg.coin} moved ${abs(diff):,.0f} {'up' if diff > 0 else 'down'}, but {side.upper()} "
-                              f"costs {price if price is not None else 'n/a'}, above Pay at most {cap:.2f}; waiting",
-                              key=f"movecap:{cur.slug}")
-        self.log.info("%s moved $%.2f from the Price To Beat $%.2f: betting %s", cfg.coin, diff, beat, side.upper())
+            return self._wait(f"The conditions are met for {side.upper()}, but it costs "
+                              f"{price if price is not None else 'n/a'}, above Price to {cap:.2f} (the most it "
+                              f"pays); waiting",
+                              key=f"condcap:{cur.slug}")
+        self.log.info("Conditions met (%s): betting %s at %.2f%s", ", ".join(f"{c} {op.upper()}" for c, op in conds.items()),
+                      side.upper(), price, f", {cfg.coin} ${move:+,.2f} from the Price To Beat" if move is not None else "")
         self._buy(cur, side, price, cap, None, now, window_left)
-        if self.bet and self.bet["slug"] == cur.slug:
+        if beat is not None and self.bet and self.bet["slug"] == cur.slug:
             self.bet["price_to_beat"] = beat          # shown with the live price while the bet runs
             self.save()
 
@@ -381,7 +398,12 @@ class Bot:
         cfg = self.cfg
         sizing = self.sizing()
         if sizing is None:
-            return self._halt("budget", f"${self.budget_left():.2f} left can't pay for {cfg.target_steps} bets in "
+            if self.waits_at_step1():
+                return self._wait(f"${self.budget_left():.2f} left can't pay for {cfg.survive_steps} bets in a row "
+                                  f"(Steps to survive), even at 5 shares each; waiting (When the ladder ends = "
+                                  f"reset). Lower Steps to survive or add money.", key=f"short:{cur.slug}",
+                                  level=logging.WARNING)
+            return self._halt("budget", f"${self.budget_left():.2f} left can't pay for {cfg.survive_steps} bets in "
                                         f"a row (Steps to survive), even at 5 shares each: lower Steps to survive "
                                         f"or add money, then Start again.")
         # sized on the order book, not the best ask alone: a big bet climbs the asks, and a win sized at the best
@@ -398,7 +420,7 @@ class Bot:
         est = plan.cost if plan else cost_of(shares, price, cur.fee_rate, cur.fee_exponent)
         if est > self.budget_left() + 1e-9:
             return self._ladder_end(f"the step {self.ladder.step} bet costs ${est:.2f} but only "
-                                    f"${self.budget_left():.2f} of the budget is left.")
+                                    f"${self.budget_left():.2f} of the budget is left.", key=f"short:{cur.slug}")
         fill = self.client.buy(cur, side, shares, cap)
         if fill is None:
             return self._wait(f"Not enough {side.upper()} shares for sale up to {cap:.2f}; retrying",
@@ -406,7 +428,15 @@ class Bot:
         self.bet = {"slug": cur.slug, "title": cur.title, "side": side, "token": cur.token(side), "step": self.ladder.step,
                     "shares": fill.shares, "price": fill.avg_price, "cost": fill.cost, "fee": fill.fee,
                     "start": cur.start, "end": cur.end, "placed": now, "url": cur.url, "best_price": price,
-                    "last_result": last}
+                    "last_result": last, "base_profit": sizing.base_profit_usd}
+        feed = getattr(self.pm, "coin_prices", None)
+        if feed is not None and getattr(feed, "available", False):   # for History's moves (after the order: no delay)
+            try:
+                feed.watch(cfg.coin)
+                coin_now, beat, _ = feed.settle_prices(cfg.coin, cur, cfg.timeframe)
+                self.bet.update(coin_at_bet=coin_now, price_to_beat=beat)
+            except Exception as e:  # noqa: BLE001 - only for the page: never stops a placed bet being saved
+                self.log.debug("coin price at bet: %s", e)
         self.ladder.rounds_bet += 1
         self.done_round = cur.slug
         self._said = ""
