@@ -4,6 +4,16 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-11-17
+
+### A stopped bot's open bet shows its win chance too
+- **What:** on the bot list, a bot stopped with a bet open now shows that bet's win chance and the green/red
+  (winning/losing) card colour, like a running bot.
+- **Why:** the owner stopped Manta with a bet open and its card showed no chance or colour.
+- **How:** `Controller.bet_chance()`: a running bot's polled midpoint as before; a stopped bot's bet asks
+  `Polymarket.midpoint()` itself, at most every 5 s and only until the round ends (then the last price is kept).
+- **Tests:** the full suite.
+
 ## [1.4.4] - 2026-11-17
 
 ### 📈 Balance and Account portfolio charts: deposits vs trading

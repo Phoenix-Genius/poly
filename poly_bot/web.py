@@ -100,6 +100,7 @@ class Controller:
     def __init__(self, bot_id: str, folder: Path, pm: Polymarket = PM, log_key: str = ""):
         self.id, self.folder, self.pm = bot_id, folder, pm
         self.log_key = log_key or bot_id        # unique across users in hosted mode ("u7/btc-5m")
+        self._chance: Optional[tuple] = None    # (round slug, when asked, price): a stopped bot's open bet (bet_chance)
         self.config_path = folder / "config.json"
         self.lock = None
         self.locked_elsewhere = False
@@ -416,7 +417,7 @@ class Controller:
                "stop_after_win": b.stop_after_win and self.running, "step": b.ladder.step,
                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
                # the market's price of the bet's side now = its win chance (the bot polls it every 2-5 s)
-               "bet_chance": b.live.get("mid") if b.bet and self.running and b.live.get("mid") is not None else None,
+               "bet_chance": self.bet_chance(),
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
                "budget": self.cfg.budget > 0}
         if full:
@@ -496,6 +497,25 @@ class Controller:
         prices = rp.get(slugs) if rp else {}
         return [{**t, "volume": known.get(t["round"], ""), "twap_beat": prices.get(t["round"], ["", ""])[0],
                  "twap_end": prices.get(t["round"], ["", ""])[1]} for t in trades]
+
+    def bet_chance(self) -> Optional[float]:
+        """The open bet's win chance now (the market's price of its side). A running bot polls it every 2-5 s; a
+        stopped bot with a bet open is asked here, at most every 5 s and only until the round ends (after that the
+        order book is gone: the last price is kept)."""
+        b = self.bot
+        if not b.bet:
+            return None
+        if self.running:
+            return b.live.get("mid")
+        slug, now = b.bet["slug"], time.time()
+        got = self._chance if self._chance and self._chance[0] == slug else None
+        if got and (now - got[1] < 5 or now >= b.bet["end"]):
+            return got[2]
+        mid = self.pm.midpoint(b.bet["token"]) if now < b.bet["end"] else None
+        if mid is None and got:
+            return got[2]
+        self._chance = (slug, now, mid)
+        return mid
 
     def balance_history(self) -> dict:
         """The Balance tile's chart: the balance bet by bet, money put in / taken out, and trading's share."""
