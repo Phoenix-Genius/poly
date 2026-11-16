@@ -4,6 +4,27 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-16
+
+### Current bet (waiting): numbers picked out, round linked
+- **What:** while the bot waits, the Current bet message shows its numbers, prices and times bold and bright
+  ("2m 00s", "0.95", "9:50AM-9:55AM", "$64,113.39"), and the round's title links to it on Polymarket.
+- **Why:** the owner: "highlight numbers, digits, time. and add link for current round."
+- **How:** engine.py `_enter` keeps `live["round"]` (slug, title, url); web.py status `round`; index.html
+  `hlNums()`, `waitHtml()`, `.waitmsg b.hl`.
+- **Tests:** existing suite (page change checked by hand).
+
+### "Martingale ladder" panel renamed "Step ladder"
+- **What / why:** the owner: "change "martingale ladder" to "step ladder"". Page heading and README.
+- **Tests:** none (page only).
+
+### Bet mode tile: compact conditions
+- **What:** the Bet mode tile shows the conditions short, e.g. "≤120s · $1+ · 0.50–0.95" (· = AND, "or" between
+  OR conditions) instead of "≤120s left AND move $1+ AND 0.50–0.95"; hovering shows the long form.
+- **Why:** the owner: "simplify description about conditions. compact it. just for me to see it."
+- **How:** index.html `condShort()`, used by `modeTile()`.
+- **Tests:** none (page only).
+
 ## [1.4.2] - 2026-11-16
 
 ### Settings column folds away

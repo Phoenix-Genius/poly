@@ -37,7 +37,7 @@ SDK for live trading). Your browser opens **http://127.0.0.1:8090**, then:
 
 1. **＋ New bot**: pick the coin and the round length.
 2. **Settings** (middle column): choose the sizing, side mode and max price, then **Save settings**.
-3. Check the **Martingale ladder**: how many losses in a row your budget pays for.
+3. Check the **Step ladder**: how many losses in a row your budget pays for.
 4. Click **▶ Start**.
 
 Leave the terminal window open while the bots run. Closing it (or Ctrl+C) stops them. A bet still open when you

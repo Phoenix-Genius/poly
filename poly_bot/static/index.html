@@ -46,6 +46,8 @@
   body.set-folded #setShow:hover { color: var(--accent); background: var(--row-hover, rgba(127,127,127,.08)); }
   #setShow .vt { writing-mode: vertical-rl; letter-spacing: .04em; }
   #setHide { padding: 3px 8px; font-size: 12.5px; margin-left: 6px; }
+  .waitmsg b.hl { color: var(--text); font-weight: 600; }
+  .condrow { display: block; white-space: nowrap; font-size: 11.5px; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; }
   body.no-bots .app { grid-template-columns: 290px minmax(0, 1fr); }
   .col { overflow-y: auto; min-width: 0; }
   #botsCol { background: var(--side-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
@@ -837,6 +839,17 @@ function schedulePreview() {
 }
 
 // --- the page ---
+// the waiting message with its numbers, prices and times picked out, and the round's title linked to Polymarket
+function hlNums(t) {
+  return t.replace(/(\d{1,2}:\d{2}(?:[AP]M)?(?:-\d{1,2}:\d{2}[AP]M)?|\$?\d+(?:,\d{3})*(?:\.\d+)?(?:h \d+m|m \d+s|s|%)?)/g, '<b class="hl">$1</b>');
+}
+function waitHtml(msg, round) {
+  const m = esc(msg || "");
+  if (!round?.title) return hlNums(m);
+  const title = esc(round.title), link = `<a href="${esc(round.url || `https://polymarket.com/event/${round.slug}`)}" target="_blank" rel="noopener">${title}</a>`;
+  if (!m.includes(title)) return `${hlNums(m)} · ${link}`;   // a message without the round's name: the link after it
+  return m.split(title).map(hlNums).join(link);
+}
 function panel(id, title, sum, body) {
   return `<section class="panel ${folded.has(id) ? "folded" : ""}" id="${id}"><h2 data-fold="${id}">${title} <span class="sum">${sum}</span></h2><div class="body">${body}</div></section>`;
 }
@@ -851,10 +864,18 @@ function condText(v) {
   const or = ors.join(" OR ");
   return ands.join(" AND ") + (ors.length ? (ands.length ? " AND " + (ors.length > 1 ? `(${or})` : or) : or) : "") || "no condition";
 }
+// the same, compact for the Bet mode tile: "≤120s · $1+ · 0.50–0.95" (· = AND, "or" between OR conditions)
+function condShort(v) {
+  const what = {time: `≤${+v.cond_time_sec}s`, move: `$${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
+  const on = ["time", "move", "price"].filter(c => v[`cond_${c}`] && v[`cond_${c}`] !== "off");
+  const ands = on.filter(c => v[`cond_${c}`] === "and").map(c => what[c]);
+  const ors = on.filter(c => v[`cond_${c}`] === "or").map(c => what[c]).join(" or ");
+  return [...ands, ...(ors ? [ors] : [])].join(" · ") || "no condition";
+}
 // the Bet mode tile: which mode and its main setting, e.g. "Conditions ≤90s left AND 0.75–0.95", "Side · random"
 function modeTile(v) {
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
-  if (v.entry_mode === "conditions") return `Conditions ${small(esc(condText(v)))}`;
+  if (v.entry_mode === "conditions") return `Conditions ${small(`<span class="condrow" title="${esc(condText(v))}">${esc(condShort(v))}</span>`)}`;
   return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · ${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`)}`;
 }
 function render() {
@@ -894,7 +915,7 @@ function render() {
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
-    <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Martingale ladder <span class="sum" id="ladderSum"></span></h2>
+    <section class="panel ${folded.has("ladderPanel") ? "folded" : ""}" id="ladderPanel"><h2 data-fold="ladderPanel">Step ladder <span class="sum" id="ladderSum"></span></h2>
       <div class="body"><div class="ladder-tools muted" id="ladderNote"></div><div class="scroll" id="ladderTable"></div></div></section>
     ${panel("historyPanel", "History", `${s.trade_count} bets`, histBar(s) + historyTable(...histRows(s), s.trade_count))}
     ${panel("simPanel", "🎲 Simulation", "what these settings do over many bets", simPanelBody())}
@@ -963,7 +984,7 @@ function coinVsBeat(coin, now, beat) {
 }
 function betPanel(s) {
   const b = s.bet;
-  if (!b) return panel("betPanel", "Current bet", "none", `<p class="muted" style="margin:0">${esc(s.running ? s.message : "No open bet.")}</p>`);
+  if (!b) return panel("betPanel", "Current bet", "none", `<p class="muted waitmsg" style="margin:0">${s.running ? waitHtml(s.message, s.round) : "No open bet."}</p>`);
   const ended = b.ends_in <= 0, mid = b.mid;
   const upChance = mid == null ? null : (b.side === "up" ? mid : 1 - mid);
   return panel("betPanel", "Current bet", `${b.side === "up" ? "📈 Up" : "📉 Down"} · step ${b.step} · ${ended ? "waiting for result" : "ends in " + secs(b.ends_in)}`, `

@@ -471,6 +471,7 @@ class Controller:
             "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,
             "bet": bet,
             "next_in": fmt_secs(next_start - now) if next_start else "",
+            "round": b.live.get("round") if self.running and not b.bet else None,
             "ladder": self._ladder(self.cfg, plan_price(self.cfg), b.ladder.step, b.ladder.base),
             "trades": shown,
             # Resets and settings changes since the oldest bet shown (all of them while every bet is shown)

@@ -461,6 +461,8 @@ class Bot:
         cur, nxt = self.pm.current_round(cfg.coin, cfg.timeframe)
         later = f"next round starts in {fmt_secs(nxt.start - now)}" if nxt else "waiting for the next round"
         self.live = {"next_start": nxt.start if nxt else None}
+        if cur:                        # the page links the round the bot is waiting in
+            self.live["round"] = {"slug": cur.slug, "title": cur.title, "url": cur.url}
         coins = getattr(self.pm, "coin_prices", None)
         if coins is not None and getattr(coins, "available", False):
             coins.watch(cfg.coin)      # the coin's prices from before each round starts: its TWAP Price To Beat

@@ -181,7 +181,8 @@ The legacy `py-clob-client` is superseded: don't use it.
 - **Result fast / official (2026-11-16):** the owner noticed results take ~3 min, so the bot only bets late in the
   round after a bet; asked to fix it, then "build it", but "keep running Alpaca bot as it before because it is
   running well now". So `result_wait` is fast by default and **Alpaca (btc-5m-9, live) is official**; don't switch
-  it without asking. Also asked: History "Bet at" time and a "Missed" rounds column (blank when none).
+  it without asking. (Same day, after 67/67 fast results matched the official ones, the owner asked to make Alpaca
+  fast, then changed their mind before the restart: "dont make it fast, just leave it official".) Also asked: History "Bet at" time and a "Missed" rounds column (blank when none).
 - **Two Bet modes (2026-11-16, later the same day):** "make mode 2 types - "side" and "conditions". remove hit,
   time, move." Old settings are converted by `config.upgrade()` to conditions that bet the same; keep it so old
   files and presets load. Reverses the 2026-11-13 choice of separate modes and the "kept unchanged" below. In
