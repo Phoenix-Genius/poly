@@ -131,6 +131,14 @@ FIELDS: dict[str, tuple] = {
                          "(5m: 100 s, 15m: 5 min, 1h: 20 min)."),
     "poll_interval_sec": (2.0, "number", None, "Check interval (s)",
                           "How often the bot checks the round. 1-5 is fine."),
+    "result_wait": ("fast", "select", ["fast", "official"], "Result",
+                    "When a round's bet counts as won or lost, so the bot can bet again. fast = about 10-30 s after "
+                    "the round ends, once the bot's own 60 s TWAP (what Polymarket settles on) and the market (the "
+                    "winner at 0.97+) agree and the coin ended clearly away from the Price To Beat; a close round "
+                    "waits for the official result. Polymarket's official result is still checked when it comes, "
+                    "and in the rare case it differs the ladder and History are corrected. official = wait for "
+                    "Polymarket's result (2.5-3.5 min after the end), so after a bet the bot can only bet in the "
+                    "last ~2 min of the next round."),
 }
 
 

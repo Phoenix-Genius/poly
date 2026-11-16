@@ -13,7 +13,8 @@ Pure logic, no I/O. Two ways to get each bet's price and result:
           recorded price when Price was just reached (prices jump between the bot's 2 s checks; calibrated on the
           paper bots' real hit fills).
   The price paid is the path's price plus SPREAD (the ask is a little above the mid). A bet is only placed once the
-  previous one is paid out (SETTLE_SEC after its round ends), like the bot. Runs stitch random half-day stretches
+  previous one is paid out, like the bot: SETTLE_SEC after its round ends with Result = official, FAST_SETTLE_SEC
+  with Result = fast unless the round ended close (settle_after()). Runs stitch random half-day stretches
   of the history together, so each run sees real streaks but runs differ.
   Then the **price gap** is added: 1-minute history can't show how fast prices move, so the replay's prices come
   out cheaper than what the bots really pay. price_gap() measures it on the owner's own bots' real bets (same
@@ -45,6 +46,8 @@ PATH_POINTS = 200             # points per curve (downsampled)
 SPREAD = 0.01                 # the ask is about a cent above the path's (mid) price
 HIT_FILL = 0.6                # just reached Price from: how far from it to the next recorded price the fill lands
 SETTLE_SEC = 170              # a round's result comes about this long after it ends (from the bots' history)
+FAST_SETTLE_SEC = 30          # Result = fast: the bot's own TWAP and the market agree about this long after the end
+FAST_CLOSE = (0.15, 0.85)     # ... unless the round ended close (Up price still in here near the end, no coin path)
 BLOCK_SEC = 12 * 3600         # runs are stitched from random stretches of this length
 # what the bots really paid above the replay's price, per Bet mode (BTC 5m paper bots' bets, 2026-11-14; hit, time and
 # move were the Bet modes the conditions replaced: a Price, Time left and Move condition alone)
@@ -78,6 +81,19 @@ MIN_GAP_BETS = 30             # own real bets needed before the measured gap rep
 
 
 # --- entries: where the bot would have bought in one past round ---------------------------------------------------
+def settle_after(cfg, rnd: dict) -> float:
+    """Seconds after round rnd's end until the bot can bet again (its result is in)."""
+    if getattr(cfg, "result_wait", "official") != "fast":
+        return SETTLE_SEC
+    from .engine import FAST_MARGIN
+    coin = rnd.get("coin") or {}
+    path = coin.get("a") or coin.get("c")
+    if path and coin.get("o"):
+        return SETTLE_SEC if abs(path[-1]) < FAST_MARGIN * coin["o"] else FAST_SETTLE_SEC
+    p = _price_at(rnd.get("h") or [], rnd["end"] - rnd["start"] - 5)
+    return SETTLE_SEC if p is not None and FAST_CLOSE[0] < p < FAST_CLOSE[1] else FAST_SETTLE_SEC
+
+
 def _price_at(h: list, t: float) -> Optional[float]:
     """The Up price at t seconds into the round (linear between points; the last point before the round = start)."""
     if not h:
@@ -234,9 +250,10 @@ class RealFeed:
             if r["start"] + e[0] < self.free_at:
                 continue                       # still waiting for the previous bet's result
             t, side, price = e
-            self.free_at = r["end"] + SETTLE_SEC
+            wait = settle_after(self.cfg, r)
+            self.free_at = r["end"] + wait
             return price, r["result"] == side, {"round": r["start"], "end": r["end"], "slug": r.get("slug", ""),
-                                                "paid_at": r["end"] + SETTLE_SEC, "side": side, "at": round(t),
+                                                "paid_at": r["end"] + wait, "side": side, "at": round(t),
                                                 "best": raw[2] if raw else price}
         raise ValueError("No past round had an entry with these settings: nothing to simulate.")
 

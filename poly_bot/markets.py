@@ -79,6 +79,7 @@ class Round:
     min_size: float = 5.0
     condition_id: str = ""        # the market's id on chain; live trading redeems winnings with it
     volume: float = 0.0           # USDC traded in this round so far (Gamma; lags the trades by a little)
+    up_price: Optional[float] = None   # Gamma's outcome price of Up (after the end: ~0.9995 / 0.0005 within ~30 s)
 
     def token(self, side: str) -> str:
         return self.up_token if side == "up" else self.down_token
@@ -111,6 +112,7 @@ def parse_round(event: dict) -> Round:
         accepting=bool(m.get("acceptingOrders")) and not m.get("closed"),
         closed=bool(m.get("closed")),
         result=result,
+        up_price=float(prices[outcomes.index("up")]) if len(prices) == 2 else None,
         fee_rate=float(fees.get("rate", DEFAULT_FEE_RATE)) if m.get("feesEnabled", True) else 0.0,
         fee_exponent=float(fees.get("exponent", 1.0)),
         min_size=float(m.get("orderMinSize") or 5),

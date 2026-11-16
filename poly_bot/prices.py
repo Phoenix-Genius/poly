@@ -23,7 +23,7 @@ from .markets import MarketError, get_json, iso
 
 URL = "wss://ws-live-data.polymarket.com"
 OPEN_API = "https://polymarket.com/api/crypto/crypto-price"
-KEEP_SEC = 15 * 60
+KEEP_SEC = 20 * 60             # a 15m round's TWAP Price To Beat needs the minute before it
 PING_SEC = 5
 FRESH_SEC = 15                 # a price older than this isn't "live" any more
 # Polymarket settles Up/Down rounds on Chainlink's 60 s TWAP: the mean of the per-second price from 62 to 3 s before
@@ -103,6 +103,11 @@ class PriceFeed:
         if now is not None and beat is not None:
             return now, beat, True
         return self.price(coin), self.price_to_beat(coin, r, timeframe), False
+
+    def last_second(self, coin: str) -> int:
+        """The unix second of the newest price received for the coin (0 = none)."""
+        with self._lock:
+            return int(self._last.get(symbol(coin), (0, 0))[0])
 
     def price(self, coin: str) -> Optional[float]:
         """The latest price, if it is live (younger than FRESH_SEC)."""

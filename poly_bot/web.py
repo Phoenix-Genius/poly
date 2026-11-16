@@ -450,7 +450,7 @@ class Controller:
             bet["ends_in"] = max(0, b.bet["end"] - now)
             bet["win_profit"] = round(b.bet["shares"] - b.bet["cost"], 2)
         phase, message = self._phase()
-        trades = read_trades(self.cfg.trade_log)
+        trades = with_gaps(read_trades(self.cfg.trade_log))
         shown = self.with_volume(list(reversed(trades[-100:])))
         next_start = b.live.get("next_start") if self.running and not b.bet else None
         return {
@@ -494,8 +494,40 @@ class Controller:
     def history(self) -> dict:
         """Every logged bet (newest first) and every event: the page's "Show all" and CSV download. status() sends
         only the newest 100 bets, every 2 s."""
-        trades = read_trades(self.cfg.trade_log)
+        trades = with_gaps(read_trades(self.cfg.trade_log))
         return {"trades": self.with_volume(list(reversed(trades))), "events": read_events(self.folder), "trade_count": len(trades)}
+
+
+ROUND_LEN = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
+
+
+def round_of(slug: str) -> Optional[tuple[int, int]]:
+    """(start unix, length s) from a round's slug like btc-updown-5m-1794792300; None for other slugs."""
+    parts = (slug or "").split("-")
+    try:
+        return int(parts[-1]), ROUND_LEN[parts[-2]]
+    except (IndexError, KeyError, ValueError):
+        return None
+
+
+def with_gaps(trades: list[dict]) -> list[dict]:
+    """Each bet (oldest first) with "missed": rounds between the previous bet's round and this one that got no bet
+    ("" for none, or the first bet), and "bet_left": seconds left in its round when it was bought ("" unknown)."""
+    out, prev = [], None
+    for t in trades:
+        r = round_of(t.get("round", ""))
+        missed, left = "", ""
+        if r:
+            if prev and prev[1] == r[1] and r[0] > prev[0]:
+                missed = (r[0] - prev[0]) // r[1] - 1 or ""
+            try:
+                placed = calendar.timegm(time.strptime(t["placed"], "%Y-%m-%d %H:%M:%S")) - 9 * 3600
+                left = max(0, r[0] + r[1] - placed)
+            except (KeyError, ValueError, TypeError):
+                pass
+            prev = r
+        out.append({**t, "missed": missed, "bet_left": left})
+    return out
 
 
 def streak_bets(trades: list[dict], step: int) -> list[dict]:

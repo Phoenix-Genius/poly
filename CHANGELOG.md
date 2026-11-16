@@ -4,6 +4,44 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-16
+
+### Result: fast (bet again ~30 s after a round instead of ~3 min)
+- **What:** a new setting **Result** (Entry card): **fast** (default) takes a bet's result about 10-30 s after its
+  round ends, once the bot's own 60 s TWAP (what Polymarket settles on) ended at least 0.008% of the price
+  (BTC: ~$5) from the TWAP Price To Beat **and** the market agrees (the winner's price on Gamma 0.97+; the CLOB's book is gone (404) once a round ends). A closer round, or
+  a gap in the price feed, waits for the official result as before. **official** waits for Polymarket's result as
+  before. Polymarket's official result is still checked for every fast one; if it ever differs, the ladder (step,
+  debt, wins/losses, profit), the balance (paper) or claim (live) and the History row are corrected, and a ⚠️ row
+  says so. Live: a fast win's pUSD is only claimable after the official result, so a bet that needs more than the
+  wallet's cash waits for it. **Alpaca** was set to official, so it keeps betting exactly as before; every other
+  bot is fast.
+- **Why:** the owner: "result soon" took ~3 min, so after each bet the bot could only bet in the last ~2 min of
+  the next round (Alpaca: 85% of 542 bets with under 2.5 min left; results came a median 181 s after the end).
+  Timed live: the winner's price was 0.9995 at +30 s, the CLOB's winner flag came at +162 s and flapped until
+  +230 s, Gamma's finalPrice later still. Our TWAP vs the official prices (76 rounds recorded): median error $0.02,
+  max $5.26; it picked the wrong side only on rounds that ended within ~$1, hence the margin.
+- **How:** engine.py `_fast_result`, `pending` (saved in state), `_confirm_pending`, `_fix_result`, constants
+  FAST_MARGIN, FAST_MARKET; `_buy` checks `client.cash()` (live). live.py `settle(confirmed=False)` keeps the claim
+  with `wait` until Gamma/CLOB have the result, `cash()`, `fix_result()`; paper.py `fix_result()`. prices.py
+  `last_second()`, KEEP_SEC 20 min (a 15m round's TWAP beat). trades.py column `result_by` (fast / official /
+  corrected) and `fix_trade()`. simulate.py `settle_after()`: FAST_SETTLE_SEC 30 s unless the round ended close.
+- **Tests:** tests/test_fast_result.py (fast default, official unchanged, close round, market disagrees, feed gap,
+  both corrections, restart keeps pending, live claim waits, simulator timing).
+
+### History: Bet at, Missed, ⚡
+- **What:** **Bet at** = when the bet was bought (JST); **Left** = seconds left in its round then (e.g. 182s);
+  Round shows the rounds missed since the previous bet's round in brackets, e.g. "Nov 15 8:55-9:00PM (2)", nothing when none; Result shows ⚡ for
+  a fast result and "⚠ corrected" when the official result overturned it. **Fast check** (after Result, fast
+  results only): ✓ when Polymarket's official result was the same, with how far our TWAP move was from the official
+  one (e.g. "✓ $0.02"); ⏳ until the official prices are published; ✗ when it differed (corrected). The bot now logs
+  its own move in the new trade-log column `fast_move`.
+- **Why:** the owner: "plz show bet time for each round on history table", "show missed rounds count after Round
+  column. if no missed, then it would be blank."
+- **How:** web.py `with_gaps()` (from each round's slug and `placed`, over the whole log so the oldest row shown is
+  right too), `betAtTd()`/`resultBy()` in index.html.
+- **Tests:** test_fast_result `HistoryGapsTest`.
+
 ## [1.4.0] - 2026-11-16
 
 ### Move condition on the 60-second TWAP, like Polymarket settles

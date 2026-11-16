@@ -62,7 +62,13 @@ class PaperClient:
             self._save()
         return fill
 
-    def settle(self, slug: str, result: str) -> float:
+    def fix_result(self, slug: str, delta: float, claim: Optional[dict] = None) -> None:
+        """A fast result turned out wrong: move the balance by what the official result pays more (or less)."""
+        with self._lock:
+            self.data["balance"] = round(self.balance() + delta, 6)
+            self._save()
+
+    def settle(self, slug: str, result: str, confirmed: bool = True) -> float:
         """Pay out the position in round `slug` now that it ended `result`. Returns the payout (0 for a loss)."""
         with self._lock:
             pos = self.data["positions"].pop(slug, None)

@@ -178,6 +178,10 @@ The legacy `py-clob-client` is superseded: don't use it.
   side mode. Backtests shown to the owner (7 days of BTC 5m, 1-minute prices): a side first at 0.70-0.80 won 76.9%
   vs ~76% needed (about break-even); a leader above 0.90 with ~2 min left is fairly priced; a leader at 0.60-0.70
   with ~2 min left won ~74% vs ~67% needed (small sample, untested on paper yet). Pay at most empty = no limit.
+- **Result fast / official (2026-11-16):** the owner noticed results take ~3 min, so the bot only bets late in the
+  round after a bet; asked to fix it, then "build it", but "keep running Alpaca bot as it before because it is
+  running well now". So `result_wait` is fast by default and **Alpaca (btc-5m-9, live) is official**; don't switch
+  it without asking. Also asked: History "Bet at" time and a "Missed" rounds column (blank when none).
 - **Two Bet modes (2026-11-16, later the same day):** "make mode 2 types - "side" and "conditions". remove hit,
   time, move." Old settings are converted by `config.upgrade()` to conditions that bet the same; keep it so old
   files and presets load. Reverses the 2026-11-13 choice of separate modes and the "kept unchanged" below. In

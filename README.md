@@ -186,6 +186,7 @@ ladder end / used up the budget, the longest losing streak, the win rate against
 | `max_price` | 0.55 | Never pay more per share. If the side costs more, the bot waits; after the entry window it skips the round. |
 | `entry_window_sec` | 0 (= auto) | Bet only this many seconds into a round. Auto = the first third (5m: 100 s, 15m: 5 min, 1h: 20 min, 4h: 80 min, daily: 8 h). |
 | `poll_interval_sec` | 2 | How often the bot checks. |
+| `result_wait` | fast | **Result**: when a bet counts as won or lost, so the bot can bet again. fast = ~10-30 s after the round, once the bot's own 60 s TWAP ended clearly away from the Price To Beat (BTC: ~$5) and the market agrees (0.97+); close rounds wait for the official result, which is checked for every bet and corrects the ladder and History if it ever differs. official = wait for Polymarket's result (~3 min), so after a bet the next one comes in the last ~2 min of the next round. |
 
 Minimum bet: Polymarket's minimum order is 5 shares (about $2.60 at a price of 0.50), so smaller bets are rounded
 up to 5 shares.

@@ -21,13 +21,14 @@ class FakePM:
         self.depth = depth
         self.results: dict[str, str] = {}
         self.missing = set()          # (coin, timeframe) without a series
+        self.up_price = None          # Gamma's Up outcome price (Result = fast reads it after the end)
 
     def _round(self, start: float) -> Round:
         slug = f"btc-updown-5m-{int(start)}"
         res = self.results.get(slug)
         return Round(slug=slug, title=f"Round {int(start)}", start=start, end=start + self.length,
                      up_token=f"{slug}:up", down_token=f"{slug}:down", accepting=res is None and self.clock() < start + self.length,
-                     closed=res is not None, result=res)
+                     closed=res is not None, result=res, up_price=self.up_price)
 
     def series_id(self, coin, timeframe):
         if (coin, timeframe) in self.missing:

@@ -1,8 +1,12 @@
 """The bot: one loop per bot that bets on one coin's Up or Down rounds with a martingale ladder.
 
 Each tick (every poll_interval_sec) does one of:
-- **holding**: a bet is open. Wait until its round ends, then until Polymarket posts the result (1 to 5 minutes
-  later), pay it out, and move the ladder: a win goes back to step 1, a loss goes one step up.
+- **holding**: a bet is open. Wait until its round ends, then for its result, pay it out, and move the ladder: a
+  win goes back to step 1, a loss goes one step up. Result = official waits for Polymarket's (2.5-3.5 min after the
+  end). Result = fast takes it ~10-30 s after the end once the bot's own 60 s TWAP (what Polymarket settles on)
+  ended at least FAST_MARGIN of the price away from the Price To Beat and the market agrees (the winner at
+  FAST_MARKET+); the bet is kept in `pending` until Polymarket's official result confirms it, and corrected (ladder,
+  balance, History) in the rare case it doesn't.
 - **waiting**: no bet. When a round is running and still inside the entry window, choose the side, size the bet
   for the current step at the side's best ask, and buy it (never above the max price). One bet per round.
 
@@ -17,16 +21,23 @@ import random
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, Optional
 
 from .config import BotConfig, write_json
 from .markets import MarketError, Polymarket
 from .strategy import (Ladder, buy_cap, choose_side, conditions_text, cost_of, entry_span, leader_of, sides_allowed,
                        shares_for_book, streak_sizing, walk_asks)
-from .trades import append_trade
+from .trades import append_trade, fix_trade
 
 SETTLE_CHECK_SEC = 10          # how often to ask whether an ended round has resolved
 SLOW_RESULT_SEC = 15 * 60      # warn when a result takes longer than this
+# Result = fast. Our TWAP was within $5.30 of the official one on every round checked (median $0.02, 2026-11-16) and
+# called the wrong side only when the round ended within ~$1, so a fast result needs the end at least FAST_MARGIN of
+# the price from the beat (BTC ~$64k: ~$5) and the market's agreement; anything closer waits for the official result.
+FAST_MARGIN = 0.00008
+FAST_MARKET = 0.97             # the winner's outcome price on Gamma the market must show
+FAST_CHECK_SEC = 3            # each check asks Gamma once (the CLOB's book is gone once the round ends: 404)
 
 
 class Bot:
@@ -37,6 +48,8 @@ class Bot:
         self.rng = rng or random.Random()
         self.ladder = Ladder()
         self.bet: Optional[dict] = None
+        self.pending: dict = {}        # fast results waiting for Polymarket's official one: slug -> what was assumed
+        self._next_confirm = 0.0
         self.done_round = ""           # the round already bet on (one bet per round)
         self.halted = ""               # why the bot stopped by itself: "ladder" (needs Reset), "target", "after_win"
         self.stop_after_win = False    # Stop after a win: stop at the next winning bet
@@ -63,6 +76,7 @@ class Bot:
             return
         self.ladder = Ladder.from_dict(d.get("ladder") or {})
         self.bet = d.get("bet")
+        self.pending = d.get("pending") or {}
         self.done_round = d.get("done_round", "")
         self.halted = d.get("halted", "")
         self.halt_message = d.get("halt_message", "")
@@ -70,7 +84,7 @@ class Bot:
 
     def save(self) -> None:
         write_json(self.state_path, {"ladder": self.ladder.to_dict(), "bet": self.bet, "done_round": self.done_round,
-                                     "halted": self.halted, "halt_message": self.halt_message,
+                                     "pending": self.pending, "halted": self.halted, "halt_message": self.halt_message,
                                      "stop_after_win": self.stop_after_win})
 
     def reset(self, keep_counts: bool = False) -> None:
@@ -171,6 +185,8 @@ class Bot:
             return
         if hasattr(self.client, "housekeeping"):
             self.client.housekeeping()        # live: retry claims of won rounds
+        if self.pending:
+            self._confirm_pending()
         if self.bet:
             self._hold()
         else:
@@ -242,6 +258,10 @@ class Bot:
                     pass
             return
         self.phase, self.message = "settling", "Round ended, waiting for Polymarket's result"
+        if getattr(self.cfg, "result_wait", "official") == "fast":
+            fast = self._fast_result(bet, now)
+            if fast:
+                return self._settle(fast, fast=True)
         if now < self._next_settle_check:
             return
         self._next_settle_check = now + SETTLE_CHECK_SEC
@@ -253,6 +273,100 @@ class Bot:
                                  (now - bet["end"]) // 60)
             return
         self._settle(r.result)
+
+    def _fast_result(self, bet: dict, now: float) -> Optional[str]:
+        """Result = fast: "up"/"down" once the bot's own TWAP at the round's end is clearly on one side of its TWAP
+        Price To Beat and the market agrees; None to keep waiting (too close, the feed missed that minute, ...)."""
+        if now < self.live.get("next_fast", 0):
+            return None
+        self.live["next_fast"] = now + FAST_CHECK_SEC
+        pf = getattr(self.pm, "coin_prices", None)
+        if pf is None or not getattr(pf, "available", False) or not hasattr(pf, "twap"):
+            return None
+        from .prices import TWAP_TO
+        coin = self.cfg.coin
+        try:
+            if pf.last_second(coin) < bet["end"] - TWAP_TO:      # the end's TWAP minute isn't all in yet
+                return None
+            end = pf.twap(coin, bet["end"])
+            beat = pf.twap_to_beat(coin, SimpleNamespace(slug=bet["slug"], start=bet["start"]))
+        except Exception:  # noqa: BLE001 - the official result comes anyway
+            return None
+        if end is None or beat is None:
+            return None
+        diff = end - beat
+        if abs(diff) < FAST_MARGIN * beat:
+            self.message = (f"Round ended {'+' if diff >= 0 else '-'}${abs(diff):,.2f} from the Price To Beat: too "
+                            f"close for a fast result, waiting for Polymarket's")
+            return None
+        side = "up" if diff > 0 else "down"
+        try:
+            r = self.pm.round(bet["slug"])       # the market's price after the end: Gamma's outcome prices
+        except Exception:  # noqa: BLE001 - asked again next check
+            return None
+        if r.result:                             # the official result is already in: use it
+            return None
+        up = getattr(r, "up_price", None)
+        if up is None:
+            return None
+        if (up if side == "up" else 1 - up) < FAST_MARKET:
+            self.message = f"Round ended {side.upper()} by our TWAP; waiting for the market to agree"
+            return None
+        bet["fast_diff"] = round(diff, 2)
+        return side
+
+    def _confirm_pending(self) -> None:
+        """Check fast results against Polymarket's official ones (every SETTLE_CHECK_SEC)."""
+        now = self.clock()
+        if now < self._next_confirm:
+            return
+        self._next_confirm = now + SETTLE_CHECK_SEC
+        for slug, p in list(self.pending.items()):
+            try:
+                official = self.pm.round(slug).result
+            except Exception:  # noqa: BLE001 - asked again later
+                continue
+            if not official:
+                if now - p["end"] > SLOW_RESULT_SEC and not p.get("warned"):
+                    p["warned"] = True
+                    self.log.warning("Polymarket's official result of %s is taking long; the fast result %s "
+                                     "stands until it comes", slug, p["result"].upper())
+                continue
+            self.pending.pop(slug, None)
+            if official != p["result"]:
+                self._fix_result(p, official)
+            self.save()
+
+    def _fix_result(self, p: dict, official: str) -> None:
+        """A fast result Polymarket's official result overturned: put the ladder, the balance and History right."""
+        won_fast, won = p["result"] == p["side"], official == p["side"]
+        delta = round((p["shares"] if won else 0.0) - (p["shares"] if won_fast else 0.0), 6)
+        lad = self.ladder
+        if hasattr(self.client, "fix_result"):
+            self.client.fix_result(p["slug"], delta, {"condition_id": p.get("condition_id", ""), "shares": p["shares"],
+                                                      "token": p.get("token", "")})
+        lad.pnl += delta
+        if delta < 0:                          # counted a win, really a loss: the streak owes it again
+            lad.wins, lad.losses = max(0, lad.wins - 1), lad.losses + 1
+            lad.streak_lost += -delta
+            lad.step += 1
+            lad.wins_left = 0
+        else:                                  # counted a loss, really a win: it pays the streak back
+            lad.wins, lad.losses = lad.wins + 1, max(0, lad.losses - 1)
+            lad.streak_lost = max(0.0, lad.streak_lost - delta)
+            if lad.streak_lost <= 0.005:
+                lad.step, lad.streak_lost, lad.base, lad.wins_left = 1, 0.0, 0.0, 0
+            else:
+                lad.step = max(1, lad.step - 1)
+        pnl = round(p["pnl"] + delta, 4)
+        fix_trade(self.cfg.trade_log, p["slug"], {"result": official, "payout": p["shares"] if won else 0.0,
+                                                   "pnl": pnl, "result_by": "corrected"})
+        text = (f"{p['title']}: the fast result said {p['result'].upper()} but Polymarket settled it "
+                f"{official.upper()}. Corrected: {'+' if delta >= 0 else '-'}${abs(delta):,.2f} "
+                f"(the bet is now a {'win' if won else 'loss'}; the ladder is at step {lad.step}"
+                f"{f', ${lad.streak_lost:,.2f} to win back' if lad.streak_lost else ''}).")
+        self._event("result_fixed", text)
+        self.log.warning(text)
 
     def _coin_end(self, bet: dict) -> Optional[float]:
         """The coin's Chainlink price at the bet's round end, for History (None if unknown)."""
@@ -276,15 +390,21 @@ class Bot:
         self._settle(r.result)
         return True
 
-    def _settle(self, result: str) -> None:
+    def _settle(self, result: str, fast: bool = False) -> None:
         bet = self.bet
-        payout = self.client.settle(bet["slug"], result)
+        payout = self.client.settle(bet["slug"], result, confirmed=not fast) if fast else \
+            self.client.settle(bet["slug"], result)
         won = result == bet["side"]
         profit = round(payout - bet["cost"], 6)
         recover = self.cfg.sizing == "recover"
         base = bet.get("base_profit", self.cfg.base_profit_usd) if recover else None
         self.ladder.record(bet["side"], won, profit, self.cfg.recover_wins if recover else 1, base)
         self.bet, self.live, self._slow_warned = None, {}, False
+        if fast:
+            self.pending[bet["slug"]] = {"slug": bet["slug"], "title": bet["title"], "side": bet["side"],
+                                         "shares": bet["shares"], "result": result, "pnl": round(profit, 4),
+                                         "end": bet["end"], "token": bet.get("token", ""),
+                                         "condition_id": bet.get("condition_id", "")}
         self.save()
         append_trade(self.cfg.trade_log, {
             "time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(self.clock() + 9 * 3600)),
@@ -298,9 +418,12 @@ class Bot:
             "slippage": round(max(0.0, bet["price"] - bet["best_price"]) * bet["shares"], 4)
             if bet.get("best_price") else "",
             "beat": bet.get("price_to_beat") or "", "coin_at_bet": bet.get("coin_at_bet") or "",
-            "coin_end": self._coin_end(bet) or ""})
-        self.log.info("%s %s: bet %s at %.3f, round went %s, %s$%.2f (total %s$%.2f)",
+            "coin_end": self._coin_end(bet) or "", "result_by": "fast" if fast else "official",
+            "fast_move": bet.get("fast_diff", "") if fast else ""})
+        self.log.info("%s %s: bet %s at %.3f, round went %s%s, %s$%.2f (total %s$%.2f)",
                       "WIN " if won else "LOSS", bet["title"], bet["side"].upper(), bet["price"], result.upper(),
+                      f" (fast result: our TWAP ${bet.get('fast_diff', 0):+,.2f} from the beat, the market agrees; "
+                      f"Polymarket's official result is checked when it comes)" if fast else "",
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
                       abs(self.ladder.pnl))
         if won and self.ladder.streak_lost > 0:
@@ -421,6 +544,11 @@ class Bot:
         if est > self.budget_left() + 1e-9:
             return self._ladder_end(f"the step {self.ladder.step} bet costs ${est:.2f} but only "
                                     f"${self.budget_left():.2f} of the budget is left.", key=f"short:{cur.slug}")
+        cash = getattr(self.client, "cash", None)
+        if cash is not None and est > cash() + 1e-9:   # live: a fast-result win isn't claimable before the official
+            return self._wait(f"The step {self.ladder.step} bet costs ${est:.2f} but the account has ${cash():.2f} "
+                              f"cash until the last win can be claimed (after Polymarket's official result); "
+                              f"waiting", key=f"cash:{cur.slug}")
         fill = self.client.buy(cur, side, shares, cap)
         if fill is None:
             return self._wait(f"Not enough {side.upper()} shares for sale up to {cap:.2f}; retrying",
@@ -428,7 +556,8 @@ class Bot:
         self.bet = {"slug": cur.slug, "title": cur.title, "side": side, "token": cur.token(side), "step": self.ladder.step,
                     "shares": fill.shares, "price": fill.avg_price, "cost": fill.cost, "fee": fill.fee,
                     "start": cur.start, "end": cur.end, "placed": now, "url": cur.url, "best_price": price,
-                    "last_result": last, "base_profit": sizing.base_profit_usd}
+                    "last_result": last, "base_profit": sizing.base_profit_usd,
+                    "condition_id": getattr(cur, "condition_id", "")}
         feed = getattr(self.pm, "coin_prices", None)
         if feed is not None and getattr(feed, "available", False):   # for History's moves (after the order: no delay)
             try:

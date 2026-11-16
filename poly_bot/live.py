@@ -264,8 +264,9 @@ class LiveClient:
             self._save()
         return fill
 
-    def settle(self, slug: str, result: str) -> float:
-        """The round ended `result`: a won position is claimed (or queued to claim). Returns the payout."""
+    def settle(self, slug: str, result: str, confirmed: bool = True) -> float:
+        """The round ended `result`: a won position is claimed (or queued to claim). Returns the payout.
+        confirmed False (a fast result): the claim waits until Polymarket has the official result."""
         with self._lock:
             pos = self.data["positions"].pop(slug, None)
             if not pos:
@@ -274,10 +275,27 @@ class LiveClient:
             if payout:
                 self.data["claims"][slug] = {"condition_id": pos["condition_id"], "shares": payout, "tries": 0,
                                              "token": pos.get("token") or self._token(slug, pos["side"])}
+                if not confirmed:
+                    self.data["claims"][slug]["wait"] = True
             self._save()
-        if payout:
+        if payout and confirmed:
             self._claim(slug)
         return payout
+
+    def cash(self) -> float:
+        """pUSD in the wallet now: what a bet can really spend (won shares not claimed yet aren't cash)."""
+        return self.balance() - self.unclaimed()
+
+    def fix_result(self, slug: str, delta: float, claim: Optional[dict] = None) -> None:
+        """A fast result turned out wrong: a 'won' claim that really lost is dropped; a 'lost' bet that really won
+        gets its claim (`claim`: condition_id, shares, token)."""
+        with self._lock:
+            if delta < 0:
+                self.data["claims"].pop(slug, None)
+            elif claim:
+                self.data["claims"][slug] = {**claim, "tries": 0}
+            self._save()
+        self._balance_cache = (0.0, 0.0)
 
     def housekeeping(self) -> None:
         """Retry claims that failed earlier (called by the bot every tick; does something once a minute)."""
@@ -307,6 +325,13 @@ class LiveClient:
         claim = self.data["claims"].get(slug)
         if not claim:
             return
+        if claim.get("wait"):                  # a fast result: nothing to redeem before the official one
+            try:
+                if not self.pm.round(slug).result:
+                    return
+            except Exception:  # noqa: BLE001 - asked again next minute
+                return
+            claim.pop("wait", None)
         if self._still_held(claim) is False:
             with self._lock:
                 self.data["claims"].pop(slug, None)
