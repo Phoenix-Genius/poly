@@ -114,6 +114,32 @@ class FastResultTest(unittest.TestCase):
         bot.tick()
         self.assertIsNone(bot.bet)
 
+    def test_the_last_live_price_before_the_end_counts_when_gamma_is_stale(self):
+        self.pm.up_price = 0.265                               # Gamma's cached price after the end: stale
+        self.pm.midpoint = lambda token: 0.99 if token.endswith(":up") else 0.01
+        bot = self.make()
+        self.clock.t += 5
+        bot.tick()
+        self.clock.t = bot.bet["end"] - 4                      # holding in the last seconds: reads the book
+        bot.live["next"] = 0
+        bot.tick()
+        self.clock.t = bot.bet["end"] + 1
+        bot.tick()
+        self.assertIsNone(bot.bet, bot.message)
+        self.assertEqual(read_trades(bot.cfg.trade_log)[-1]["result_by"], "fast")
+
+    def test_an_old_live_price_does_not_count(self):
+        self.pm.up_price = 0.5
+        self.pm.midpoint = lambda token: 0.99 if token.endswith(":up") else 0.01
+        bot = self.make()
+        self.clock.t += 5
+        bot.tick()                                             # read 295 s before the end: too old
+        bot.live["mid_at"] = bot.bet["end"] - 200
+        self.clock.t = bot.bet["end"] + 1
+        bot.tick()
+        self.assertIsNotNone(bot.bet)
+        self.assertIn("market to agree", bot.message)
+
     def test_waits_while_the_feed_misses_the_end(self):
         self.feed.last = 1_800_000_000 + 300 - 10              # newest price 10 s before the end
         bot = self.make()

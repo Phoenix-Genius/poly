@@ -4,6 +4,29 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-16
+
+### Settings column folds away
+- **What:** a « button next to Details folds the settings column to a thin "⚙️ Settings" strip, so the bot's page
+  gets the width; clicking the strip opens it again. Remembered per browser.
+- **Why:** the owner: "make setting part as withdrawal, to wider main part."
+- **How:** index.html `setFolded()`, `body.set-folded` (grid column 34 px), `#setHide`, `#setShow`; localStorage
+  `setFolded`.
+- **Tests:** none (page only).
+
+### Fix: fast results on only half the rounds
+- **What:** Result = fast now checks the market on the bet's live order-book price from the round's last 15 s
+  (read every 2 s then), not on Gamma's outcome price (now only the fallback, e.g. right after a restart).
+- **Why:** the owner asked for the fast-check results: all 55 fast rounds matched the official result (median gap
+  $0.16, max $2.24), but 65 rounds, some ending $100-200 away, still waited the full ~3 min. Watching the bot's own
+  feed and checks live showed the TWAP was fine every time; Gamma's outcome price after the end is a cached value
+  that can stay stale for minutes (Up 0.265 for 30+ s on a round our TWAP had ending +$70). The CLOB book itself is
+  gone (404) once a round ends, so the last live price before the end is the market's verdict.
+- **How:** engine.py `_hold` stores `live["mid_at"]` and polls the midpoint every 2 s in the last LAST_MID_SEC;
+  `_fast_result` uses that midpoint when it's from the last LAST_MID_SEC, Gamma's `up_price` otherwise.
+- **Tests:** test_fast_result `test_the_last_live_price_before_the_end_counts_when_gamma_is_stale`,
+  `test_an_old_live_price_does_not_count`.
+
 ## [1.4.1] - 2026-11-16
 
 ### Result: fast (bet again ~30 s after a round instead of ~3 min)

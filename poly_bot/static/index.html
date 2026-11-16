@@ -36,6 +36,16 @@
   .app { display: grid; grid-template-columns: 290px 440px minmax(0, 1fr); height: 100vh; }
   @media (max-width: 1300px) { .app { grid-template-columns: 250px 380px minmax(0, 1fr); } }
   body.no-bots #setCol { display: none; }
+  /* settings folded away: a thin strip, the page gets the room */
+  body.set-folded .app { grid-template-columns: 290px 34px minmax(0, 1fr); }
+  @media (max-width: 1300px) { body.set-folded .app { grid-template-columns: 250px 34px minmax(0, 1fr); } }
+  body.set-folded #setCol > :not(#setShow) { display: none; }
+  #setShow { display: none; }
+  body.set-folded #setShow { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; height: 100%;
+    padding: 10px 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 12.5px; }
+  body.set-folded #setShow:hover { color: var(--accent); background: var(--row-hover, rgba(127,127,127,.08)); }
+  #setShow .vt { writing-mode: vertical-rl; letter-spacing: .04em; }
+  #setHide { padding: 3px 8px; font-size: 12.5px; margin-left: 6px; }
   body.no-bots .app { grid-template-columns: 290px minmax(0, 1fr); }
   .col { overflow-y: auto; min-width: 0; }
   #botsCol { background: var(--side-bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
@@ -305,10 +315,12 @@
   </aside>
 
   <aside class="col" id="setCol">
+    <button id="setShow" type="button" title="Show the settings">»<span class="vt">⚙️ Settings</span></button>
     <div class="set-top">
       <div id="setBotName" data-no-i18n></div>
       <div class="set-title"><h2>Settings</h2><span class="chips" id="setIdChips"></span>
-        <button class="btn" id="detailsBtn" type="button" aria-expanded="false"><span>Details</span><span class="chev" aria-hidden="true">▾</span></button></div>
+        <button class="btn" id="detailsBtn" type="button" aria-expanded="false"><span>Details</span><span class="chev" aria-hidden="true">▾</span></button>
+        <button class="btn" id="setHide" type="button" title="Fold the settings away for a wider page">«</button></div>
       <div id="summary" class="summary-box"></div>
     </div>
     <div id="form"></div>
@@ -790,6 +802,13 @@ function setDetails(open) {
   localStorage.setItem("details", open ? "1" : "");
 }
 setDetails(!!localStorage.getItem("details"));
+function setFolded(fold) {                  // the settings column folded to a strip (remembered per browser)
+  document.body.classList.toggle("set-folded", fold);
+  try { localStorage.setItem("setFolded", fold ? "1" : ""); } catch (e) {}
+}
+try { setFolded(!!localStorage.getItem("setFolded")); } catch (e) {}
+$("#setHide").onclick = () => setFolded(true);
+$("#setShow").onclick = () => setFolded(false);
 $("#detailsBtn").onclick = () => setDetails(!$("#setCol").classList.contains("details-open"));
 $("#setCol").addEventListener("click", e => {
   const c = e.target.closest(".chip[data-edit]"); if (!c) return;

@@ -38,6 +38,10 @@ SLOW_RESULT_SEC = 15 * 60      # warn when a result takes longer than this
 FAST_MARGIN = 0.00008
 FAST_MARKET = 0.97             # the winner's outcome price on Gamma the market must show
 FAST_CHECK_SEC = 3            # each check asks Gamma once (the CLOB's book is gone once the round ends: 404)
+# The market check uses the bet token's live midpoint from the round's last seconds (read while holding; the order book
+# is gone once the round ends). Gamma's outcome price is only the fallback (e.g. right after a restart): after the end
+# it is a cached value that can stay stale for minutes (2026-11-16: Up 0.265 for 30+ s on a round that ended +$70).
+LAST_MID_SEC = 15
 
 
 class Bot:
@@ -241,7 +245,11 @@ class Bot:
             self.message = f"Bet {bet['side'].upper()} on {bet['title']}"
             if now >= self.live.get("next", 0):
                 mid = self.pm.midpoint(bet["token"])
-                self.live = {**self.live, "mid": mid, "next": now + 5}
+                # every 2 s in the last LAST_MID_SEC: the last live price before the end is Result = fast's market check
+                gap = 2 if bet["end"] - now <= LAST_MID_SEC else 5
+                self.live = {**self.live, "mid": mid, "next": now + gap}
+                if mid is not None:
+                    self.live["mid_at"] = now
             pf = getattr(self.pm, "coin_prices", None)
             if pf is not None and pf.available and bet.get("price_to_beat"):   # the coin vs the beat (60 s TWAP)
                 twap = pf.twap(self.cfg.coin) if hasattr(pf, "twap") else None
@@ -300,13 +308,20 @@ class Bot:
                             f"close for a fast result, waiting for Polymarket's")
             return None
         side = "up" if diff > 0 else "down"
-        try:
-            r = self.pm.round(bet["slug"])       # the market's price after the end: Gamma's outcome prices
-        except Exception:  # noqa: BLE001 - asked again next check
-            return None
-        if r.result:                             # the official result is already in: use it
-            return None
-        up = getattr(r, "up_price", None)
+        up = None
+        mid, mid_at = self.live.get("mid"), self.live.get("mid_at", 0)
+        if mid is not None and mid_at >= bet["end"] - LAST_MID_SEC:   # the live market in the round's last seconds
+            up = mid if bet["side"] == "up" else 1 - mid
+        if up is None or (up if side == "up" else 1 - up) < FAST_MARKET:
+            try:
+                r = self.pm.round(bet["slug"])   # fallback: Gamma's outcome price (cached, can be stale)
+            except Exception:  # noqa: BLE001 - asked again next check
+                return None
+            if r.result:                         # the official result is already in: use it
+                return None
+            gamma = getattr(r, "up_price", None)
+            if gamma is not None and (up is None or (gamma if side == "up" else 1 - gamma) >= FAST_MARKET):
+                up = gamma
         if up is None:
             return None
         if (up if side == "up" else 1 - up) < FAST_MARKET:
