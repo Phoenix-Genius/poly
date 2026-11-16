@@ -132,6 +132,11 @@ The legacy `py-clob-client` is superseded: don't use it.
   small tables. They ask for changes one at a time, look at the result, then say "commit plz".
 - UI preferences carried over from hyperliquid: compact, at a glance, flat design (no rounded corners, no shadows),
   foldable sections with a coloured left stripe on light grey, columns bot list | settings | page, times in JST.
+- **2026-11-17:** wants research tools, not only bot results: 🔎 Rounds (Polymarket's own rounds) is separate from
+  📋 History (the bots' bets) — "don't remove my bet history". Bot cards: open bet coloured by **winning / losing**
+  (win chance ≥ 50%), not by side (red Down looked like a loss). Charts: deposits must be told apart from trading
+  (owner chose the blockchain scan over a single "deposited in total" figure). Tables: full width, no sideways
+  scroll, sticky headers, click a row to highlight it. Round names everywhere like History's "Nov 16 11:00-11:05AM".
 - **Decisions (2026-11-09, first request):** "build martingale about polymarket btc price prediction 5m, 15m …".
   Owner chose: mirror the hyperliquid project's structure (web UI, AGENTS/CHANGELOG, versioning); **paper first,
   live later**; side modes: all of them configurable (incl. follow last result, cheaper side, one side only); all

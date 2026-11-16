@@ -107,6 +107,11 @@ FIELDS: dict[str, tuple] = {
                        "conditions mode: the Price condition's highest price per share, e.g. 0.95. Also the most the bot "
                        "ever pays per share (the order's limit, so a fill can't slip above it), even when the bet "
                        "came from an OR Move. Empty = 0.95. Price off = no limit (up to 0.99)."),
+    "cond_join": ("and", "select", ["and", "or"], "ANDs _ ORs",
+                  "conditions mode: how the OR conditions join the AND conditions. and = every AND condition AND at "
+                  "least one OR, e.g. Time OR, Move OR, Price AND = (time or move) and price. or = all the AND "
+                  "conditions together, OR any one OR condition alone, e.g. Time OR, Move AND, Price AND = time or "
+                  "(move and price). Same either way when every condition is AND, or every one is OR."),
     "side_mode": ("alternate", "select", SIDE_MODES, "Side mode",
                   "side mode: which side to bet. alternate = Up, Down, Up, Down... follow_last = bet what the last finished round was "
                   "(momentum). opposite_last = bet against it. cheaper = the side with the lower price. "

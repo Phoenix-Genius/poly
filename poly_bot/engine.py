@@ -352,6 +352,17 @@ class Bot:
                 self._fix_result(p, official)
             self.save()
 
+    def _coin_at(self, bet) -> Optional[float]:
+        """The coin's TWAP when the bet was bought, from the feed's kept prices: for History when the feed had
+        stalled at that moment (its backfill came after)."""
+        pf = getattr(self.pm, "coin_prices", None)
+        if pf is None or not getattr(pf, "available", False) or not bet.get("placed"):
+            return None
+        try:
+            return pf.twap(self.cfg.coin, bet["placed"])
+        except Exception:  # noqa: BLE001 - only for the page
+            return None
+
     def _fix_result(self, p: dict, official: str) -> None:
         """A fast result Polymarket's official result overturned: put the ladder, the balance and History right."""
         won_fast, won = p["result"] == p["side"], official == p["side"]
@@ -432,7 +443,7 @@ class Bot:
             "best_price": bet.get("best_price", ""),
             "slippage": round(max(0.0, bet["price"] - bet["best_price"]) * bet["shares"], 4)
             if bet.get("best_price") else "",
-            "beat": bet.get("price_to_beat") or "", "coin_at_bet": bet.get("coin_at_bet") or "",
+            "beat": bet.get("price_to_beat") or "", "coin_at_bet": bet.get("coin_at_bet") or self._coin_at(bet) or "",
             "coin_end": self._coin_end(bet) or "", "result_by": "fast" if fast else "official",
             "fast_move": bet.get("fast_diff", "") if fast else ""})
         self.log.info("%s %s: bet %s at %.3f, round went %s%s, %s$%.2f (total %s$%.2f)",

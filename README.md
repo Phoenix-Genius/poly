@@ -180,6 +180,7 @@ ladder end / used up the budget, the longest losing streak, the win rate against
 | `cond_time_sec` | 90 | conditions: Time left is true while this many seconds or fewer are left (until 5 s before the end). |
 | `cond_move_usd` | 10 | conditions: Move is true for Up while the coin's live price (Chainlink, what rounds settle on) is this many dollars above the Price To Beat, for Down while that far below (the price right now). |
 | `cond_price_min`, `cond_price_max` | empty | conditions: Price is true for each side whose best ask is in this range; empty `cond_price_min` = 0.50 (the favourite only), empty `cond_price_max` = 0.95. `cond_price_max` is also the order's limit (the most the bot pays per share, even for a bet from an OR Move); Price off = no limit (up to 0.99). |
+| `cond_join` | and | conditions: **ANDs _ ORs**, how OR conditions join the AND ones. and = every AND plus at least one OR: (A or B) and C. or = any one OR alone, or every AND together: A or (B and C). The same when all are AND or all are OR. |
 | `side_mode` | alternate | `alternate` Up/Down/Up…, `follow_last` = what the last finished round was, `opposite_last` = against it, `cheaper` = the lower-priced side, `leader` = the dearer side, `up_only`, `down_only`, `flip_on_loss`, `flip_on_win`, `random`. |
 | `first_side` | up | The first side for alternate/flip modes, and the fallback when the last result isn't known. |
 | `min_price` | 0.45 | Never bet on a side cheaper than this (stops long shots). If it is cheaper, the bot waits; after the entry window it skips the round. 0 = no minimum. |
@@ -197,6 +198,20 @@ Each bot is a folder `profiles/<id>/` with `config.json`, `state-paper.json` (th
 `trades-paper.csv` (every settled bet), `paper-account.json` and `bot.log`. Run as many bots as you like side by
 side, e.g. BTC 5m with `cheaper` next to ETH 15m with `follow_last`. Times in the log and history are Japan time
 (JST).
+
+On the page:
+
+- **Bot list:** a bot with an open bet shows its side, cost and win chance now (the market's price of its side);
+  the whole card is green while the bet is winning (50%+), red while it's losing.
+- **📋 History** (top of the bot list): every bot's results side by side and all their bets merged, newest first;
+  filter by bot or paper/live, ⬇ CSV. Click a row (here or in a bot's History) to highlight it.
+- **🔎 Rounds:** Polymarket's own last ~7 days of BTC 5m / 15m rounds: result, official Price To Beat and final
+  price, the Up price and BTC's move at 5m … 30s left, high and low. Ask "the leader at X left (or any time),
+  costing A–B, BTC moved $M+ its way": rounds matched, how often it won, break-even, profit per $1, longest losing
+  run. Click a row to highlight it; ⬇ CSV.
+- **Click the Balance tile** for the balance over time: money put in (budget changes, resets) vs earned by trading.
+  **Click a live bot's Account portfolio tile** for the whole wallet: deposits and withdrawals read from the
+  blockchain (Polygon), trading from Polymarket's activity.
 
 Headless, without the page:
 

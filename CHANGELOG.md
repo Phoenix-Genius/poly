@@ -4,6 +4,81 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-17
+
+### 📈 Balance and Account portfolio charts: deposits vs trading
+- **What:** click the **Budget balance** (or Balance) tile, or a live bot's **Account portfolio** tile, for a chart of
+  its value over time (solid line) and the money put in less taken out (dashed line, a dot per deposit or
+  withdrawal); the gap is what trading earned. Above: Started with, Put in since, Earned by trading, Now. Hover shows
+  the date, value, money put in and earned. Below: every deposit / withdrawal (the account's link to Polygonscan).
+- **Why:** the owner wanted to see how the balance and the account changed, and how much was deposited vs earned.
+- **How:** Balance: `charts.budget_history()` from the bot's trade log: a balance jump a bet's pnl doesn't explain is
+  money put in / taken out, named after the Budget / Network / Paper balance / Reset event logged in between.
+  Account: `wallet_history.py`: every pUSD, USDC.e and USDC transfer of the wallet from Polygon
+  (polygon-bor-rpc.publicnode.com, 10,000 blocks per request; drpc's free plan refuses log ranges), cached in
+  data/wallets/<wallet>.json and topped up each minute; transactions in Polymarket's activity (/v2/activity:
+  trades, payouts, rebates) are trading, any other transaction's net flow is a deposit or withdrawal (a coin swap
+  nets to zero). Value = coins + open positions at cost (an Up/Down round's closes at its end); the last point is
+  the real portfolio value. First scan runs in the background, the dialog shows progress. Endpoints
+  /api/bots/<id>/balance_history and /account_history. Checked on the live wallet: deposits − withdrawals − trading
+  matches the pUSD it holds.
+- **Tests:** tests/test_charts.py.
+
+### Bot list: an open bet's win chance
+- **What:** a running bot's card shows its open bet's side, cost and win chance now, e.g. "📈 Up $8.53 · 78%"
+  (green from 50%, red below); the list refreshes every 4 s while any bot has a bet open (else every 10 s).
+- **Why:** to see at a glance how every open bet is doing.
+- **How:** `Controller.summary()` "bet_chance" = the bot's live midpoint of the bet's token (`Bot.live["mid"]`,
+  polled every 2-5 s while holding); `renderBots()`.
+- **Tests:** the full suite.
+
+### The page no longer jumps to the top while scrolled
+- **What / why:** the 2 s redraw could reset the main page's scroll position.
+- **How:** `render()` keeps #mainCol's (and the window's) scroll position across the redraw.
+
+### 🔎 Rounds: Polymarket's own past rounds, for research
+- **What:** a **🔎 Rounds** button next to 📋 History opens Polymarket's last ~7 days of BTC 5m or 15m rounds
+  (not the bots' bets): start, round link, result, official Price To Beat / final price / final move, the Up price
+  and BTC's move at 5m (the open), 4m, 3m, 2m, 90s, 60s, 30s left (15m: 15m, 10m, 5m, 3m, 2m, 90s, 60s, 30s), and the round's high and
+  low. A question box: "the leader at X left, costing A–B, BTC moved $M+ its way" shows the rounds matched, how
+  often the leader won, the break-even (average price), profit per $1 (no fees) and the longest losing run; the
+  matched rounds can be listed alone. ⬇ CSV downloads every round.
+- **Why:** the owner wanted to research Polymarket's round history itself.
+- **How:** `poly_bot/rounds.py` `rounds_view()` (GET /api/rounds?coin=btc&tf=5m, cached 60 s) from the cached
+  `History` (results, Up price about once a minute) and `CoinPaths` (BTC 60 s TWAP move, Binance), plus
+  data/research/polymarket-twap-<tf>.json for the official prices. Page: `#roundsDlg`, `rdRender()`, `rdPick()`.
+- **Tests:** tests/test_rounds_view.py.
+
+### 📋 History: every bot in one table
+- **What:** a **📋 History** button at the top of the bot list opens every bot's results side by side (bets,
+  wins, losses, win %, net P&L, staked, fees, best and worst bet, longest losing run, balance, first and last bet;
+  an All row) and every bet of every bot merged, newest first, with a Bot column. Filter by bot (or click its row)
+  and paper/live; ⬇ CSV downloads the bets shown.
+- **Why:** the owner wanted all the bots' results in one place.
+- **How:** `App.all_history()` (GET /api/history) reads each bot's trade log; `bot_results()` totals one log; the
+  newest `ALL_HISTORY_MAX` (3000) bets are sent. Page: `#allHistDlg`, `ahRender()`.
+- **Tests:** tests/test_all_history.py.
+
+### Move at bet no longer missing after a price-feed stall
+- **What:** History's Move at bet was empty on about 1 bet in 5 for bots without a Move condition.
+- **Why:** the Chainlink price socket sometimes stays open but stops sending; nothing reconnected it, so a bet bought
+  then found no live price. Move bots never showed it only because they can't bet without a price.
+- **How:** `PriceFeed._run` reconnects after `STALL_SEC` (8 s) without a watched coin's price (the subscribe backfill
+  fills the gap); at payout `Bot._coin_at()` fills a missing coin_at_bet from the feed's kept prices (TWAP at the
+  bet's time). Old rows stay empty.
+- **Tests:** the full suite.
+
+### Conditions: "A or (B and C)"
+- **What:** a new setting **ANDs _ ORs** (Mode & side card, conditions mode). **and** (default, as before) = every
+  AND condition and at least one OR: (A or B) and C. **or** = any one OR condition alone, or every AND condition
+  together: A or (B and C), e.g. time ≤ 90 s OR (move $20+ AND price 0.60-0.85). Identical when every condition is
+  AND or every one is OR. With **or**, a Time AND no longer holds back the start of the entry window (an OR alone can
+  pass earlier). Price to stays the most the bot pays.
+- **Why:** the owner: "A or B and C?" then "yes, add A or (B and C)".
+- **How:** config.py `cond_join`; strategy.py `sides_allowed`, `entry_span`, `conditions_text`; index.html
+  `condText()`, `condShort()`; the simulator uses the same functions.
+- **Tests:** test_conditions `test_or_join_an_or_alone_or_all_ands`, `test_or_join_is_the_same_without_mixing`.
+
 ## [1.4.3] - 2026-11-16
 
 ### Current bet (waiting): numbers picked out, round linked

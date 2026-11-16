@@ -54,7 +54,9 @@ def entry_span(cfg, length: float) -> tuple[float, float]:
     """(open, close): seconds after a round's start between which the bot may bet. side mode: from the start through
     the Entry window. conditions mode: until 5 s before the end, from Time left before it when Time is an AND."""
     if mode(cfg) == "conditions":
-        if getattr(cfg, "cond_time", "off") == "and":
+        conds = cfg.conditions() if hasattr(cfg, "conditions") else {}
+        ors_alone = getattr(cfg, "cond_join", "and") == "or" and "or" in conds.values()
+        if getattr(cfg, "cond_time", "off") == "and" and not ors_alone:   # an OR alone may pass before Time left
             return max(0.0, length - cfg.cond_time_sec), length - 5
         return 0.0, length - 5
     return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec)
@@ -97,6 +99,8 @@ def conditions_text(cfg) -> str:
         parts.append((op.upper(), what))
     ands = [w for op, w in parts if op == "AND"]
     ors = [w for op, w in parts if op == "OR"]
+    if getattr(cfg, "cond_join", "and") == "or" and ands and ors:    # ORs alone, or every AND together
+        return " OR ".join(ors) + " OR " + ("(" + " AND ".join(ands) + ")" if len(ands) > 1 else ands[0])
     text = " AND ".join(ands)
     if ors:
         text += (" AND " if ands else "") + ("(" + " OR ".join(ors) + ")" if ands and len(ors) > 1 else " OR ".join(ors))
@@ -117,7 +121,8 @@ def sides_allowed(cfg, left: float, move: Optional[float], prices: dict) -> tupl
     Each condition that is on is true for a set of sides: Time left (both, while `left` <= Time left at most),
     Move (the way the coin moved, while |move| >= Move at least; None = no live price or Price To Beat yet) and
     Price (each side whose best ask is within Price from-to). A side is allowed when every AND condition is true for
-    it and, if any condition is OR, at least one OR condition is too. buy_cap (Price to) is checked after."""
+    it and, if any condition is OR, at least one OR condition is too (ANDs _ ORs = and); with ANDs _ ORs = or, a side
+    is allowed when one OR condition is true for it, or every AND condition is. buy_cap (Price to) is checked after."""
     both = {"up", "down"}
     sets: dict[str, set] = {}
     why: dict[str, str] = {}
@@ -140,10 +145,16 @@ def sides_allowed(cfg, left: float, move: Optional[float], prices: dict) -> tupl
         why["price"] = f"{max(dear)[1].upper()} costs {max(dear)[0]:.2f}, above Price to {hi:.2f}" \
             if dear and not sets["price"] and lo >= 0.5 else f"no side at {price_range_text(cfg)} ({show})"
     allowed = set(both)
-    for c, op in conds.items():
-        if op == "and":
-            allowed &= sets[c]
+    ands = [c for c, op in conds.items() if op == "and"]
+    for c in ands:
+        allowed &= sets[c]
     ors = [c for c, op in conds.items() if op == "or"]
+    if getattr(cfg, "cond_join", "and") == "or" and ands and ors:
+        allowed = allowed | set().union(*(sets[c] for c in ors))   # ORs alone, or every AND together
+        if allowed:
+            return sorted(allowed), ""
+        return [], ("; ".join(why[c] for c in ands if not sets[c]) or "the AND conditions point to different sides") \
+            + " (all ANDs), or " + " or ".join(why[c] for c in ors)
     if ors:
         allowed &= set().union(*(sets[c] for c in ors))
     if allowed:

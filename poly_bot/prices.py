@@ -26,6 +26,8 @@ OPEN_API = "https://polymarket.com/api/crypto/crypto-price"
 KEEP_SEC = 20 * 60             # a 15m round's TWAP Price To Beat needs the minute before it
 PING_SEC = 5
 FRESH_SEC = 15                 # a price older than this isn't "live" any more
+STALL_SEC = 8                  # no price for this long on an open socket: it stalled (it happens), reconnect; the
+                               # backfill sent on subscribing fills the gap
 # Polymarket settles Up/Down rounds on Chainlink's 60 s TWAP: the mean of the per-second price from 62 to 3 s before
 # the moment (checked 2026-11-16 against the events' eventMetadata priceToBeat/finalPrice: median error $0.00)
 TWAP_FROM, TWAP_TO = 62, 3
@@ -49,6 +51,7 @@ class PriceFeed:
         self._opens: dict[str, float] = {}                # round slug -> Price To Beat (once known)
         self._asked: dict[str, float] = {}                # round slug -> when the endpoint was last asked
         self._ws = None
+        self._got = 0.0                                   # when the socket last brought a watched coin's price
         self._thread: Optional[threading.Thread] = None
         try:
             from websockets.sync.client import connect  # noqa: F401
@@ -171,11 +174,15 @@ class PriceFeed:
                         self._ws = ws
                     ws.send(json.dumps({"action": "subscribe", "subscriptions": subs}))
                     next_ping = time.time() + PING_SEC
+                    self._got = time.time()
                     while True:
                         if time.time() >= next_ping:
                             ws.send("PING")
                             next_ping = time.time() + PING_SEC
                             self._prune()
+                        if time.time() - self._got > STALL_SEC:
+                            log.info("price feed: no price for %ds, reconnecting", STALL_SEC)
+                            break
                         try:
                             msg = ws.recv(timeout=PING_SEC)
                         except TimeoutError:
@@ -203,6 +210,7 @@ class PriceFeed:
             if sym not in self._symbols:             # ALL streams every coin: keep the watched ones
                 return
             series = self._series.setdefault(sym, {})
+            self._got = time.time()
             for d in points:
                 try:
                     sec, v = int(d["timestamp"]) // 1000, float(d["value"])

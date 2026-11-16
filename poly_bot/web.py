@@ -32,6 +32,9 @@ from .paper import PaperClient
 from .history import MIN_ROUNDS, CoinPaths, History
 from .simulate import default_gap, needs_coin, price_gap, simulate
 from .strategy import build_ladder, buy_cap, plan_price, recover_part, steps_that_fit, streak_sizing
+from .charts import budget_history
+from .rounds import rounds_view
+from .wallet_history import wallet_history
 from .trades import append_event, read_events, read_trades
 
 log = logging.getLogger("poly")
@@ -412,6 +415,8 @@ class Controller:
                "halted": "" if b.halted == "after_win" else b.halted,     # a stop you asked for isn't a halt
                "stop_after_win": b.stop_after_win and self.running, "step": b.ladder.step,
                "pnl": round(b.ladder.pnl, 2), "bet_side": b.bet["side"] if b.bet else "",
+               # the market's price of the bet's side now = its win chance (the bot polls it every 2-5 s)
+               "bet_chance": b.live.get("mid") if b.bet and self.running and b.live.get("mid") is not None else None,
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
                "budget": self.cfg.budget > 0}
         if full:
@@ -492,6 +497,18 @@ class Controller:
         return [{**t, "volume": known.get(t["round"], ""), "twap_beat": prices.get(t["round"], ["", ""])[0],
                  "twap_end": prices.get(t["round"], ["", ""])[1]} for t in trades]
 
+    def balance_history(self) -> dict:
+        """The Balance tile's chart: the balance bet by bet, money put in / taken out, and trading's share."""
+        return budget_history(self.cfg.trade_log, self.folder, self.balance())
+
+    def account_history(self) -> dict:
+        """The Account portfolio tile's chart (live): the wallet's value, deposits / withdrawals from the blockchain
+        and the trading profit from Polymarket's activity."""
+        c = self.bot.client
+        if not self.cfg.is_live or not hasattr(c, "sdk"):
+            raise ValueError("The account chart is for live bots: their Polymarket wallet.")
+        return wallet_history(str(c.sdk.wallet), self.portfolio())
+
     def history(self) -> dict:
         """Every logged bet (newest first) and every event: the page's "Show all" and CSV download. status() sends
         only the newest 100 bets, every 2 s."""
@@ -529,6 +546,38 @@ def with_gaps(trades: list[dict]) -> list[dict]:
             prev = r
         out.append({**t, "missed": missed, "bet_left": left})
     return out
+
+
+ALL_HISTORY_MAX = 3000
+
+
+def bot_results(trades: list[dict]) -> dict:
+    """One bot's totals from its trade log (oldest first): bets, wins, net, costs, the longest losing run."""
+    def num(v) -> float:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+    wins = losses = run = worst_run = 0
+    net = staked = fees = best = worst = 0.0
+    for t in trades:
+        pnl = num(t.get("pnl"))
+        net += pnl
+        staked += num(t.get("cost"))
+        fees += num(t.get("fee"))
+        best, worst = max(best, pnl), min(worst, pnl)
+        if t.get("result") and t.get("result") == t.get("side"):
+            wins, run = wins + 1, 0
+        else:
+            losses, run = losses + 1, run + 1
+            worst_run = max(worst_run, run)
+    n = wins + losses
+    return {"bets": n, "wins": wins, "losses": losses, "win_rate": round(100 * wins / n, 1) if n else None,
+            "net": round(net, 2), "staked": round(staked, 2), "fees": round(fees, 2), "best": round(best, 2),
+            "worst": round(worst, 2), "max_loss_run": worst_run,
+            "first": trades[0].get("placed") or trades[0].get("time") if trades else "",
+            "last": trades[-1].get("time") if trades else "",
+            "balance": trades[-1].get("balance") if trades else ""}
 
 
 def streak_bets(trades: list[dict], step: int) -> list[dict]:
@@ -589,6 +638,25 @@ class App:
         bots = [{**c.summary(full=True), "pinned": c.id in pins} for c in self.controllers.values()]
         bots.sort(key=lambda b: (not b["pinned"], rank.get(b["id"], len(rank))))
         return {"bots": bots, "version": __version__, "started": STARTED}
+
+    def all_history(self) -> dict:
+        """Every bot's results side by side (one row each, from its trade log) and every bet of every bot merged,
+        newest first (the newest ALL_HISTORY_MAX): the page's 📋 History."""
+        order, pins = self.order()
+        rank = {i: n for n, i in enumerate(order)}
+        ctrls = sorted(self.controllers.values(), key=lambda c: (c.id not in pins, rank.get(c.id, len(rank))))
+        bots, bets = [], []
+        for c in ctrls:
+            try:
+                trades = read_trades(c.cfg.trade_log)
+            except Exception:  # noqa: BLE001 - one unreadable log must not hide the others
+                trades = []
+            bots.append({"id": c.id, "name": c.cfg.display_name, "network": c.cfg.network, "running": c.running,
+                         "settings": c.cfg.settings(), **bot_results(trades)})
+            for t in trades:
+                bets.append({**t, "bot": c.id, "bot_name": c.cfg.display_name, "network": c.cfg.network})
+        bets.sort(key=lambda t: t.get("time") or "", reverse=True)
+        return {"bots": bots, "bets": bets[:ALL_HISTORY_MAX], "bet_count": len(bets)}
 
     # --- list order and pins (like the hyperliquid bot): profiles/.order.json, shared by every browser ---------
     def _read_order(self) -> tuple[list, list]:
@@ -839,11 +907,22 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
                 return self._call(app.list)
             if path == "/api/presets":
                 return self._call(app.presets)
+            if path == "/api/history":
+                return self._call(app.all_history)
+            if path == "/api/rounds":                     # Polymarket's own past rounds (🔎 Rounds)
+                q = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
+                coin = q.get("coin", "btc").lower() if q.get("coin", "btc").upper() in COINS else "btc"
+                tf = q.get("tf", "5m") if q.get("tf", "5m") in ("5m", "15m") else "5m"
+                return self._call(lambda: rounds_view(HISTORY, COIN_PATHS, coin, tf))
             m = BOT_PATH.match(path)
             if m and m.group(2) == "status":
                 return self._call(lambda: app.get(m.group(1)).status())
             if m and m.group(2) == "history":
                 return self._call(lambda: app.get(m.group(1)).history())
+            if m and m.group(2) == "balance_history":            # the Balance tile's chart
+                return self._call(lambda: app.get(m.group(1)).balance_history())
+            if m and m.group(2) == "account_history":            # the Account portfolio tile's chart
+                return self._call(lambda: app.get(m.group(1)).account_history())
             self._json(404, {"error": "not found"})
 
         def do_POST(self):

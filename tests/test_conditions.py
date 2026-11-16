@@ -67,6 +67,34 @@ class SidesAllowedTest(unittest.TestCase):
         self.assertEqual(sides, [])
         self.assertIn(" or ", why)
 
+    def test_or_join_an_or_alone_or_all_ands(self):
+        # time OR (move AND price): the owner's "A or (B and C)"
+        c = cfg(cond_join="or", cond_time="or", cond_time_sec=90, cond_move="and", cond_move_usd=20,
+                cond_price="and", cond_price_min=0.6, cond_price_max=0.85)
+        p = {"up": 0.7, "down": 0.31}
+        self.assertEqual(sides_allowed(c, 200, 25.0, p)[0], ["up"])           # move and price, early in the round
+        self.assertEqual(sides_allowed(c, 200, 5.0, p)[0], [])                # neither branch
+        self.assertEqual(sides_allowed(c, 60, 5.0, p)[0], ["down", "up"])     # time alone (both; the leader is bet)
+        sides, why = sides_allowed(c, 200, 5.0, p)
+        self.assertIn("(all ANDs), or", why)
+        self.assertEqual(entry_span(c, 300), (0.0, 295))                       # the AND branch may pass from the start
+        self.assertEqual(conditions_text(c), "time <= 90s OR (move >= $20 AND price 0.60-0.85)")
+        # the same settings with ANDs _ ORs = and: (time) AND move AND price
+        c2 = cfg(cond_join="and", cond_time="or", cond_time_sec=90, cond_move="and", cond_move_usd=20,
+                 cond_price="and", cond_price_min=0.6, cond_price_max=0.85)
+        self.assertEqual(sides_allowed(c2, 200, 25.0, p)[0], [])
+        self.assertEqual(sides_allowed(c2, 60, 25.0, p)[0], ["up"])
+
+    def test_or_join_is_the_same_without_mixing(self):
+        for ops in (("and", "and", "and"), ("or", "or", "or"), ("and", "off", "and"), ("off", "or", "or")):
+            a = cfg(cond_join="and", cond_time=ops[0], cond_move=ops[1], cond_price=ops[2], cond_move_usd=10,
+                    cond_price_min=0.6, cond_price_max=0.9)
+            b = cfg(cond_join="or", cond_time=ops[0], cond_move=ops[1], cond_price=ops[2], cond_move_usd=10,
+                    cond_price_min=0.6, cond_price_max=0.9)
+            for left, move, p in ((200, 15.0, {"up": 0.7, "down": 0.3}), (60, -3.0, {"up": 0.95, "down": 0.06}),
+                                  (60, 15.0, {"up": 0.5, "down": 0.5})):
+                self.assertEqual(sides_allowed(a, left, move, p)[0], sides_allowed(b, left, move, p)[0], ops)
+
     def test_and_with_ors(self):
         c = cfg(cond_time="and", cond_time_sec=90, cond_move="or", cond_move_usd=30,
                 cond_price="or", cond_price_min=0.9, cond_price_max=0.99)
