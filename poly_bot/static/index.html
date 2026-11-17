@@ -317,6 +317,7 @@
   #roundsDlg #rdTable table { font-size: 12px; }
   #roundsDlg #rdTable th, #roundsDlg #rdTable td { padding: 3px 4px; }
   #rdTable th, #ahBets th, #ahBots th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+  .simlog th { position: sticky; top: 0; z-index: 1; background: var(--section-bg); }   /* header stays while the table scrolls */
   #roundsDlg .ah-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
   #roundsDlg .ah-bets { max-height: 55vh; }
   .rd-ask { margin: 6px 0; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -327,8 +328,8 @@
   .rd-stats b { font-size: 16px; font-variant-numeric: tabular-nums; }
   #rdTable td.ldr { font-weight: 600; }
   #rdTable tr[data-slug] { cursor: pointer; }
-  #historyPanel tr[data-hk], #ahBets tr[data-hk] { cursor: pointer; }
-  #historyPanel tr.rd-mark td, #ahBets tr.rd-mark td,
+  #historyPanel tr[data-hk], #ahBets tr[data-hk], #simPanel tr[data-hk] { cursor: pointer; }
+  #historyPanel tr.rd-mark td, #ahBets tr.rd-mark td, #simPanel tr.rd-mark td,
   #rdTable tr.rd-mark td { background: color-mix(in srgb, var(--amber) 22%, transparent); }
   .toast { position: fixed; right: 16px; bottom: 16px; background: var(--red-bg); color: var(--red); border: 1px solid var(--red); padding: 8px 12px; max-width: 420px; display: none; }
   .empty { padding: 40px 0; text-align: center; color: var(--muted); }
@@ -614,11 +615,23 @@ function select(id) {
 // --- setting presets: named settings (no name, live/paper, money or keys) to load into a bot or start one from ---
 let presets = {};
 async function loadPresets() { try { presets = (await api("/api/presets")).presets || {}; } catch (e) { presets = {}; } }
-const PRESET_SKIP = ["bot_name", "network", "budget_usd", "paper_balance_usd"];
+const PRESET_SKIP = ["bot_name", "network", "budget_usd", "paper_balance_usd", "stop_profit_usd"];   // stop_profit_usd = Until earn
 function presetSummary(p) {
   const m = p.entry_mode === "conditions" ? condText(p) : `side ${p.side_mode}`;
   return `${p.coin} ${p.timeframe} · ${m} · ${p.sizing === "recover" ? `$${p.base_profit_usd}/win` : `×${p.multiplier}`}` +
     (+p.max_steps ? ` · ${p.max_steps} losses` : "");
+}
+// the presets whose settings the bot has now (for the Bet mode tile); coin, timeframe and what presets don't keep
+// are ignored, so a preset loaded into any market counts, and changing a setting afterwards drops it
+const PRESET_ANY = [...PRESET_SKIP, "coin", "timeframe"];
+const sameSetting = (a, b) => {
+  const none = x => x == null || x === "" || x === 0 || x === "0";   // empty and 0 both mean "off"
+  if (none(a) || none(b)) return none(a) && none(b);
+  if (typeof a === "object" || typeof b === "object") return JSON.stringify(a) === JSON.stringify(b);
+  return !isNaN(+a) && !isNaN(+b) ? +a === +b : String(a) === String(b);
+};
+function presetsOf(v) {
+  return Object.keys(presets).filter(n => Object.entries(presets[n]).every(([k, x]) => PRESET_ANY.includes(k) || sameSetting(x, v[k])));
 }
 function presetMenu(btn) {
   if ($("#stopMenu")?.dataset.for === "presets") return closeStopMenu();
@@ -627,7 +640,7 @@ function presetMenu(btn) {
   m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = "presets"; m.setAttribute("role", "menu");
   m.style.borderColor = "var(--accent)";
   const names = Object.keys(presets);
-  m.innerHTML = `<div class="menu-sep">Presets</div><button type="button" role="menuitem" data-p="save">💾 Save these settings as a preset…<small>The form as it is now (saved or not); not the name, live/paper, Budget, Paper balance or keys</small></button>` +
+  m.innerHTML = `<div class="menu-sep">Presets</div><button type="button" role="menuitem" data-p="save">💾 Save these settings as a preset…<small>The form as it is now (saved or not); not the name, live/paper, Budget, Paper balance, Until earn or keys</small></button>` +
     (names.length ? names.map(n => `<div class="preset-row"><button type="button" role="menuitem" data-p="load" data-name="${esc(n)}">📄 ${esc(n)}<small>${esc(presetSummary(presets[n]))}</small></button><button type="button" class="preset-del" data-p="del" data-name="${esc(n)}" title="Delete this preset">✕</button></div>`).join("")
       : `<div class="muted" style="padding:8px 12px;font-size:12px">No presets saved yet: use 💾 above.</div>`) +
     (bots.some(b => b.id !== current) ? `<div class="menu-sep">Load settings from a bot</div>` +
@@ -988,7 +1001,7 @@ function render() {
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}</div>
-      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div></div>
+      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div>${presetsOf(s.settings).length ? `<div class="muted" style="font-size:11px" title="This bot's settings are the same as this preset's (📚 Presets)">📄 Preset <b>${esc(presetsOf(s.settings).join(", "))}</b></div>` : ""}</div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
@@ -1175,25 +1188,26 @@ function simLogHtml(r) {
     if (!t.event) { lastPaid = t.paid_at; return t; }
     return {...t, paid_at: lastPaid};
   }).reverse().map(t => {
-    if (t.event) return `<tr class="ev ${t.event === "ladder_end" ? "ev-ladder_end" : ""}"><td></td><td class="l num">${t.paid_at ? jst(t.paid_at) : ""}</td><td class="l" colspan="15">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🪜 Ladder ended: back to step 1"}</td></tr>`;
+    if (t.event) return `<tr class="ev ${t.event === "ladder_end" ? "ev-ladder_end" : ""}"><td></td><td></td><td class="l num">${t.paid_at ? jst(t.paid_at) : ""}</td><td class="l" colspan="20">${t.event === "broke" ? "⛔ Budget used up: the run stops" : "🪜 Ladder ended: back to step 1"}</td></tr>`;
     const title = t.round ? etTitle(t.round, t.end) : "";
     const slip = Math.max(0, (t.price - (t.best ?? t.price)) * t.shares);
     const costs = t.cost ? ((t.fee + slip) / t.cost * 100).toFixed(1) + "%" : dash;
-    return `<tr><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
-      <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)} · bought ${t.at}s in">${esc(shortRound(title))}</a>` : dash}</td>
-      <td class="l">${t.side ? sideHtml(t.side) : dash}</td><td class="num">${stepTxt(t.step, t.win)}</td>
-      <td class="num" title="The replay's price (1-minute history)">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num" title="With the price gap your bots really pay">${(+t.price).toFixed(3)}</td>
-      <td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
-      <td class="num neg" title="The price gap">${slip > 0.005 ? money(-slip) : "$0.00"}</td><td class="num neg">${money(-t.fee)}</td><td class="num">${costs}</td>
-      <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}${resultBy(t)}</td>${fastTd(t)}<td class="num">${money(t.payout)}</td>
-      <td class="num ${tone(t.pnl)}"><b>${sgnMoney(t.pnl)}</b></td><td class="num ${tone(t.total)}">${sgnMoney(t.total)}</td><td class="num">${money(t.left)}</td></tr>`;
+    const placed = t.round ? t.round + t.at : null, hk = `sim|${t.slug}|${t.n}`;
+    // the same columns, order and look as the bot's History; Volume isn't in the replay's data
+    return `<tr data-hk="${esc(hk)}" class="${histMarked.has(hk) ? "rd-mark" : ""}"><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td>
+      <td class="l num">${placed ? jst(placed).slice(6) : dash}</td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
+      <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(shortRound(title))}</a>` : dash}${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
+      <td class="num" title="Not in the replay's data">${dash}</td><td class="num">${t.round ? `${t.end - t.round - t.at}s` : dash}</td>
+      <td class="l">${t.side ? sideHtml(t.side) : dash}</td>${moveDiffTd(t, t.move_bet)}${moveDiffTd(t, t.move_end)}<td class="num">${stepTxt(t.step, t.win)}</td>
+      <td class="num">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
+      <td class="num neg">${slip > 0.005 ? money(-slip) : "$0.00"}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs}</td>
+      <td class="l">${t.win ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
+      <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td>
+      <td class="num ${tone(t.total)}">${money(t.total, true)}</td><td class="num">${money(t.left)}</td></tr>`;
   }).join("");
   return `<details class="simlog" ${simLogOpen ? "open" : ""}><summary><b>History (run 1)</b> <span class="muted">${shown}${shown < r.log_bets ? ` of ${r.log_bets}` : ""} bets</span>${r.ladder_ends_run1 ? ` · <b class="neg">🪜 ${r.ladder_ends_run1} ladder end${r.ladder_ends_run1 > 1 ? "s" : ""}</b> <span class="muted">(red rows)</span>` : ""}</summary>
-    <div class="simhelp">Run 1 as the simulation played it, laid out like the bot's History (newest first). Best = the replay's price; Price = what the bot really pays (with the price gap, shown as Slippage). Paid out = about 3 minutes after the round, when the result comes.</div>
-    <div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l">Paid out (JST)</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th>
-      <th title="The replay's price">Best</th><th title="Price paid, with the price gap">Price</th><th>Shares</th><th>Cost</th>
-      <th title="The price gap: paid above the replay's price">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
-      <th class="l">Result</th><th title="Result = fast: ✓ = Polymarket's official result was the same; the $ is how far our TWAP move was from the official one. ⏳ = official prices not published yet. ✗ = it differed and the bet was corrected">Fast check</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>${rows}</table></div></details>`;
+    <div class="simhelp">Run 1 as the simulation played it, laid out like the bot's History (newest first). Best = the replay's price; Price = what the bot really pays (with the price gap, shown as Slippage). Paid out = about 3 minutes after the round, when the result comes. Volume isn't in the replay's data; Move at bet / end show once the coin's past prices are loaded.</div>
+    ${historyHead()}${rows}</table></div></details>`;
 }
 const SW = 560, SH = 220, SPL = 52, SPR = 8, SPT = 8, SPB = 26;   // chart box (SVG units)
 function niceTicks(lo, hi, n = 4) {
@@ -1310,6 +1324,12 @@ function moveTd(t, price, beat) {
   const d = +price - +beat, good = t.side === "up" ? d >= 0 : d < 0;
   return `<td class="num ${good ? "pos" : "neg"}" title="${esc((+price).toFixed(2))} vs ${esc((+beat).toFixed(2))}">${d >= 0 ? "+" : "−"}$${Math.abs(d).toFixed(2)}</td>`;
 }
+// the same from a ready-made move (the simulation's): green when on the bet's side
+function moveDiffTd(t, d) {
+  if (d == null || d === "") return '<td class="num"><span class="muted">–</span></td>';
+  const good = t.side === "up" ? d >= 0 : d < 0;
+  return `<td class="num ${good ? "pos" : "neg"}">${d >= 0 ? "+" : "−"}$${Math.abs(d).toFixed(2)}</td>`;
+}
 // History: when the bet was bought (JST) and how long was left in its round then
 // a History Step cell: only the ladder's last step, i.e. a win at step 2+ that ended a losing streak (bold); else empty
 function stepTxt(step, won) { return won && +step > 1 ? `<b>${esc(step)}</b>` : ""; }
@@ -1334,6 +1354,13 @@ function fastTd(t) {
     `${mine == null ? "" : `: our TWAP ${sgn(mine)}`} vs official ${sgn(off)} from the Price To Beat`;
   return `<td class="num ${same ? "pos" : "neg"}" title="${esc(tip)}">${same ? "✓" : "✗"}${gap}</td>`;
 }
+// History's table head, shared by the bot's History and the simulation's run 1
+const historyHead = () => `<div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l" title="When the bet was bought (JST)">Bet at</th><th class="l">Paid out (JST)</th><th class="l" title="The round. (2) = rounds missed since the previous bet's round: no bet in them (no side passed, waiting for a result, or the bot was stopped)">Round</th><th title="Everything traded in the round (USDC), from Polymarket once the round is over">Volume</th><th title="Seconds left in the round when the bet was bought">Left</th><th class="l">Bet</th>
+      <th title="Where the coin was when the bet was bought, against the round's real Price To Beat (Polymarket's official 60-second TWAP once published). Green = the bet's side">Move at bet</th>
+      <th title="How the round ended, on the prices Polymarket settled it on (Chainlink's 60-second TWAP): final price minus the official Price To Beat. Green = the bet's way. A dash until Polymarket publishes them">Move at end</th><th>Step</th>
+      <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
+      <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
+      <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>`;
 function historyTable(trades, events = [], total = trades.length) {
   if (!trades.length && !events.length) return '<p class="muted" style="margin:0">No bets yet.</p>';
   // newest first; in the same second an event (e.g. "Ladder ended" after the loss that ended it) is the newer one
@@ -1346,12 +1373,7 @@ function historyTable(trades, events = [], total = trades.length) {
     return (c / +t.cost * 100).toFixed(1) + "%";
   };
   let n = total;                         // bets numbered from the oldest (#1); log rows get no number
-  return `<div class="scroll"><table><tr><th title="Bet number, oldest first">#</th><th class="l" title="When the bet was bought (JST)">Bet at</th><th class="l">Paid out (JST)</th><th class="l" title="The round. (2) = rounds missed since the previous bet's round: no bet in them (no side passed, waiting for a result, or the bot was stopped)">Round</th><th title="Everything traded in the round (USDC), from Polymarket once the round is over">Volume</th><th title="Seconds left in the round when the bet was bought">Left</th><th class="l">Bet</th>
-      <th title="Where the coin was when the bet was bought, against the round's real Price To Beat (Polymarket's official 60-second TWAP once published). Green = the bet's side">Move at bet</th>
-      <th title="How the round ended, on the prices Polymarket settled it on (Chainlink's 60-second TWAP): final price minus the official Price To Beat. Green = the bet's way. A dash until Polymarket publishes them">Move at end</th><th>Step</th>
-      <th title="Best price on the book when the bot decided">Best</th><th title="Average price actually paid">Price</th><th>Shares</th><th>Cost</th>
-      <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
-      <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
+  return `${historyHead()}
     ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="20">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : t.kind === "result_fixed" ? "⚠️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr data-hk="${esc(histKey(t))}" class="${histMarked.has(histKey(t)) ? "rd-mark" : ""}"><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td>${betAtTd(t)}<td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a>${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
       <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}<td class="num">${stepTxt(t.step, t.side === t.result)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
@@ -1562,7 +1584,7 @@ const histMarked = new Set();
 const histKey = t => `${t.bot || current}|${t.round}`;
 document.addEventListener("click", e => {
   if (e.target.closest("a, button, input, select")) return;
-  const tr = e.target.closest("#historyPanel tr[data-hk], #ahBets tr[data-hk]"); if (!tr) return;
+  const tr = e.target.closest("#historyPanel tr[data-hk], #ahBets tr[data-hk], #simPanel tr[data-hk]"); if (!tr) return;
   const k = tr.dataset.hk; histMarked.has(k) ? histMarked.delete(k) : histMarked.add(k);
   tr.classList.toggle("rd-mark", histMarked.has(k));
 });

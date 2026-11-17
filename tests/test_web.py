@@ -87,8 +87,8 @@ class AppTest(unittest.TestCase):
         out = self.app.save_preset({"name": "time 90", "settings": {**src.cfg.settings(), "bot_name": "x"}})
         p = out["presets"]["time 90"]
         self.assertEqual((p["entry_mode"], p["cond_time_sec"]), ("conditions", 90))
-        for k in ("bot_name", "network", "budget_usd", "paper_balance_usd"):     # not the name, live/paper or money
-            self.assertNotIn(k, p)
+        for k in ("bot_name", "network", "budget_usd", "paper_balance_usd", "stop_profit_usd"):  # not the name,
+            self.assertNotIn(k, p)                                                  # live/paper, money or Until earn
         with self.assertRaises(ValueError):
             self.app.save_preset({"name": "bad", "settings": {"multiplier": 0.5}})  # checked like a bot's settings
         with self.assertRaises(ValueError):

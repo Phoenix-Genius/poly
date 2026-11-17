@@ -224,6 +224,7 @@ class RealFeed:
         self.left_in_block = self.block
         self.free_at = float("-inf")
         self.last_result = None
+        self.last_bet_k = None              # the previous bet's round, for History's "(N missed)"; none after a jump
 
     def next(self, lad) -> tuple[float, bool, dict]:
         """(price, won, info) of the next bet, after the previous one is paid out."""
@@ -252,9 +253,11 @@ class RealFeed:
             t, side, price = e
             wait = settle_after(self.cfg, r)
             self.free_at = r["end"] + wait
+            missed = k - self.last_bet_k - 1 if self.last_bet_k is not None else 0
+            self.last_bet_k = k
             return price, r["result"] == side, {"round": r["start"], "end": r["end"], "slug": r.get("slug", ""),
                                                 "paid_at": r["end"] + wait, "side": side, "at": round(t),
-                                                "best": raw[2] if raw else price}
+                                                "best": raw[2] if raw else price, "missed": missed}
         raise ValueError("No past round had an entry with these settings: nothing to simulate.")
 
 

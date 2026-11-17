@@ -33,7 +33,7 @@ from .history import MIN_ROUNDS, CoinPaths, History
 from .simulate import default_gap, needs_coin, price_gap, simulate
 from .strategy import build_ladder, buy_cap, plan_price, recover_part, steps_that_fit, streak_sizing
 from .charts import budget_history
-from .rounds import rounds_view
+from .rounds import official, rounds_view
 from .wallet_history import wallet_history
 from .trades import append_event, read_events, read_trades
 
@@ -344,6 +344,7 @@ class Controller:
         out = simulate(cfg, plan_price(cfg), bankroll, bets, runs, None, rounds=rounds, gap=gap)
         out["gap"] = {**g, "gap": gap}
         out["pace_per_day"] = bet_pace(read_trades(self.cfg.trade_log))
+        sim_moves(out.get("log") or [], cfg)
         self.log.info("Simulated %d runs x %d bets from $%.2f at %.2f: average %+.2f, %.0f%% end in profit", runs,
                       bets, bankroll, out["price"], out["average"], out["profit_chance"] * 100)
         return out
@@ -536,6 +537,29 @@ class Controller:
         return {"trades": self.with_volume(list(reversed(trades))), "events": read_events(self.folder), "trade_count": len(trades)}
 
 
+def sim_moves(log: list, cfg) -> None:
+    """The simulation's History (run 1), like the bot's: each bet's coin move from the Price To Beat when it was
+    bought (move_bet: the 60 s TWAP path, history.CoinPaths) and at the end (move_end: Polymarket's official Price To
+    Beat and final price where data/research has them, else the path's last point). Uses the coin prices cached so
+    far (asking starts loading the rest in the background); a round without them gets None (a dash)."""
+    bets = [t for t in log if t.get("slug")]
+    if not bets:
+        return
+    try:
+        paths, _ = COIN_PATHS.paths(cfg.coin, cfg.timeframe, [{"slug": t["slug"], "start": t["round"], "end": t["end"]}
+                                                              for t in bets])
+    except Exception:  # noqa: BLE001 - the moves are extra; the simulation stands without them
+        paths = {}
+    tw = official(cfg.timeframe) if cfg.coin.lower() == "btc" else {}
+    for t in bets:
+        p = paths.get(t["slug"]) or {}
+        a, step = p.get("a") or [], p.get("s") or 1
+        i = int(t.get("at") or 0) // step
+        t["move_bet"] = round(a[i], 2) if i < len(a) else None
+        o = tw.get(int(t["round"]))
+        t["move_end"] = round(o[1] - o[0], 2) if o else (round(a[-1], 2) if a else None)
+
+
 ROUND_LEN = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
 
 
@@ -705,7 +729,7 @@ class App:
     def presets(self) -> dict:
         try:
             data = json.loads((self.profiles / PRESETS_FILE).read_text())
-            return {"presets": {str(k): {kk: vv for kk, vv in upgrade(v).items() if kk in FIELDS}   # old Bet modes too
+            return {"presets": {str(k): {kk: vv for kk, vv in upgrade(v).items() if kk in FIELDS and kk not in PRESET_SKIP}   # old Bet modes too
                                 for k, v in sorted(data.items(), key=lambda kv: kv[0].lower()) if isinstance(v, dict)}}
         except (OSError, ValueError, AttributeError):
             return {"presets": {}}
@@ -874,7 +898,7 @@ def placed_in_round(t: dict) -> Optional[float]:
 ORDER_FILE = ".order.json"     # in a user's profiles/: the bot list's order and pins
 PRESETS_FILE = ".presets.json" # in a user's profiles/: {"name": {setting: value}}, the saved setting presets
 # a preset is the strategy: not a bot's name, live/paper or money (Budget, Paper balance), and keys never
-PRESET_SKIP = ("bot_name", "network", "budget_usd", "paper_balance_usd")
+PRESET_SKIP = ("bot_name", "network", "budget_usd", "paper_balance_usd", "stop_profit_usd")   # stop_profit_usd = Until earn
 
 BOT_PATH = re.compile(r"^/api/bots/([A-Za-z0-9_-]{1,30})/([a-z_]+)$")
 BOT_POST = {"start": Controller.start, "stop": Controller.stop, "reset": Controller.reset,

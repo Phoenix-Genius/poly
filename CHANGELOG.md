@@ -4,6 +4,36 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-11-17
+
+### Simulation's History (run 1) laid out exactly like the bot's History
+- **What:** the same 22 columns in the same order and look: #, Bet at, Paid out, Round (with "(N missed)"), Volume,
+  Left, Bet, Move at bet, Move at end, Step, Best, Price, Shares, Cost, Slippage, Fee, Costs, Result, Payout, Net,
+  Total, Balance. The Fast check column and the ⚡ mark are gone (History has neither). Rows highlight on click like
+  History's, and the header row stays in place while the table scrolls.
+- **Why:** the owner wanted the simulation's table to match History in every way.
+- **How:** one shared `historyHead()` for both tables; `moveDiffTd()` for a ready-made move. simulate.py's
+  `RealFeed` logs `missed` (rounds since the previous bet's round; none right after a jump to another stretch).
+  web.py `sim_moves()` adds `move_bet` (the 60 s TWAP path from `CoinPaths` at the bet's second) and `move_end`
+  (Polymarket's official Price To Beat / final price from data/research, else the path's last point); rounds
+  without cached coin prices get a dash, and asking starts loading them. Volume is a dash: the replay has no volume.
+- **Tests:** full suite (159) passes; a real simulation (btc-5m-11's settings, 2016 rounds): all 300 logged bets got
+  both moves, 36 had missed rounds.
+
+### Bet mode tile shows the preset a bot's settings match
+- **What:** a third line, "📄 Preset <name>", when the bot's settings are the same as a saved preset's (several are
+  listed). Coin, timeframe and what presets don't keep are ignored; changing a setting afterwards drops it.
+- **Why:** the owner wanted to see which bots run a preset.
+- **How:** `presetsOf()` / `sameSetting()` in `static/index.html` (empty and 0 both mean "off").
+- **Tests:** checked against the hosted presets: long streak matches 5 bots, hawk-quite good 1, ss none.
+
+### Presets don't keep Until earn
+- **What:** saving a preset leaves out Until earn (`stop_profit_usd`), like the name, live/paper, Budget and Paper
+  balance; presets saved before drop it when read. Loading one keeps the bot's own Until earn.
+- **Why:** the owner's call: Until earn belongs to the bot, not to a setting preset.
+- **How:** `PRESET_SKIP` (web.py and the page) gets `stop_profit_usd`; `App.presets()` filters it.
+- **Tests:** tests/test_web.py `test_setting_presets` checks it isn't saved.
+
 ## [1.4.7] - 2026-11-17
 
 ### History Step column shows only a ladder's last step
