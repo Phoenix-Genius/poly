@@ -421,6 +421,9 @@ class Controller:
                "bet_chance": self.bet_chance(),
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
                "budget": self.cfg.budget > 0}
+        # an open bet's round still running: the coin now against its Price To Beat (the card's move)
+        if b.bet and b.bet.get("price_to_beat") and b.live.get("coin_price") and time.time() < b.bet.get("end", 0):
+            out["bet_move"] = round(b.live["coin_price"] - b.bet["price_to_beat"], 2)
         if full:
             phase, message = self._phase()
             bal = self.balance()
@@ -498,6 +501,24 @@ class Controller:
         prices = rp.get(slugs) if rp else {}
         return [{**t, "volume": known.get(t["round"], ""), "twap_beat": prices.get(t["round"], ["", ""])[0],
                  "twap_end": prices.get(t["round"], ["", ""])[1]} for t in trades]
+
+    def market(self) -> Optional[dict]:
+        """The round this running bot is watching: the coin now against its Price To Beat (60 s TWAPs, as the bot
+        decides on them) and, while it holds a bet there, the market's Up price; None without both prices."""
+        b, live = self.bot, self.bot.live or {}
+        if not self.running:
+            return None
+        bet = b.bet if b.bet and time.time() < b.bet.get("end", 0) else None
+        beat = (bet or {}).get("price_to_beat") or live.get("price_to_beat")
+        now = live.get("coin_price")
+        slug = (bet or {}).get("slug") or (live.get("round") or {}).get("slug")
+        if beat is None or now is None or not slug:
+            return None
+        out = {"coin": self.cfg.coin, "timeframe": self.cfg.timeframe, "slug": slug,
+               "beat": round(beat, 2), "now": round(now, 2)}
+        if bet and live.get("mid") is not None:
+            out["up"] = round(live["mid"] if bet["side"] == "up" else 1 - live["mid"], 3)
+        return out
 
     def bet_chance(self) -> Optional[float]:
         """The open bet's win chance now (the market's price of its side). A running bot polls it every 2-5 s; a
@@ -681,7 +702,19 @@ class App:
         rank = {i: n for n, i in enumerate(order)}
         bots = [{**c.summary(full=True), "pinned": c.id in pins} for c in self.controllers.values()]
         bots.sort(key=lambda b: (not b["pinned"], rank.get(b["id"], len(rank))))
-        return {"bots": bots, "version": __version__, "started": STARTED}
+        # the top of the bot list: per coin and round length, the newest round a running bot is watching
+        markets: dict = {}
+        for c in self.controllers.values():
+            try:
+                m = c.market()
+            except Exception:             # the strip must never fail the list
+                m = None
+            if not m:
+                continue
+            key, old = (m["coin"], m["timeframe"]), markets.get((m["coin"], m["timeframe"]))
+            if not old or m["slug"] > old["slug"] or (m["slug"] == old["slug"] and "up" in m and "up" not in old):
+                markets[key] = m
+        return {"bots": bots, "markets": list(markets.values()), "version": __version__, "started": STARTED}
 
     def all_history(self) -> dict:
         """Every bot's results side by side (one row each, from its trade log) and every bet of every bot merged,

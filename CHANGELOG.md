@@ -4,6 +4,28 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.13] - 2026-11-18
+
+### Compact bot cards with the open bet's move and chance
+- **What:** a bot card is 3 rows: name, paper/LIVE and an icon-only Stop ■ / Start ▶; balance, profit, W/L; step pips
+  with the step and the open bet (or the next bet's cost). The "BTC · 5m rounds" line and the status line are gone
+  (both are in the name's tooltip; the status also on the dot). An open bet shows its side as a red ▲ / ▼ (no
+  "Up"/"Down"), its cost, the coin's move from the Price To Beat in a green/red pill (while the round runs) and the
+  win chance in a green/red pill. The name, tag and buttons are smaller and the pin takes no room unless pinned or
+  hovered, so whole names fit.
+- **Why:** the owner wanted the bot list as compact as possible, with the move and chance picked out.
+- **How:** `renderBots()`; `Controller.summary()` sends `bet_move` (coin now - the bet's Price To Beat).
+- **Tests:** full suite passes; sample cards rendered with the page's CSS in headless Chromium.
+
+### The round now on top of the bot list
+- **What:** under the running / P&L totals, per coin and round length the bots run: the round's time (JST), its Price
+  To Beat, the coin now and the difference (green ▲ / red ▼ pill), and the market's Up / Down chance while a bot
+  holds a bet there. The list reloads every 4 s while it shows.
+- **Why:** the owner wanted the Current bet's Price To Beat / BTC now / difference visible for every bot at a glance.
+- **How:** `Controller.market()` (the running bot's live 60 s TWAP price and Price To Beat, and its bet's Up price);
+  `App.list()` returns `markets` (the newest round per coin/timeframe); `renderMarkets()` in the page.
+- **Tests:** full suite passes; the page's script parses.
+
 ## [1.4.12] - 2026-11-18
 
 ### Step column cycles count wins, like the Hyperliquid bot's
