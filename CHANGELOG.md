@@ -4,6 +4,19 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-11-18
+
+### Times in JST, 24-hour
+- **What:** round labels in History, all-bots History, the simulation and the Rounds dialog read "11-18 00:35-00:40"
+  (JST) instead of Polymarket's US-Eastern "Nov 17 10:35-10:40AM" (its full title stays the tooltip); the Current
+  bet panel shows "Bitcoin Up or Down · 11-18 00:35-00:40 JST"; the round volume's "since" time and the Users
+  table's last sign-in are JST 24-hour instead of the browser's own format.
+- **Why:** the owner wanted every time in JST, 24-hour.
+- **How:** `jstFull()`; `shortRound(title, slug)` works the round out from its slug ("btc-updown-5m-<start>") and
+  falls back to the shortened title.
+- **Tests:** UI only; the page's script parses; the 10:35AM ET Nov 17 round reads 11-18 00:35-00:40 (matches the
+  bot's own log).
+
 ## [1.4.8] - 2026-11-17
 
 ### Simulation's History (run 1) laid out exactly like the bot's History

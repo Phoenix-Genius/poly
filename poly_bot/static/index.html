@@ -1080,7 +1080,7 @@ function betPanel(s) {
   const ended = b.ends_in <= 0, mid = b.mid;
   const upChance = mid == null ? null : (b.side === "up" ? mid : 1 - mid);
   return panel("betPanel", "Current bet", `${b.side === "up" ? "📈 Up" : "📉 Down"} · step ${b.step} · ${ended ? "waiting for result" : "ends in " + secs(b.ends_in)}`, `
-    <div style="margin-bottom:8px"><a href="${esc(b.url)}" target="_blank" rel="noopener" data-no-i18n>${esc(b.title)}</a></div>
+    <div style="margin-bottom:8px"><a href="${esc(b.url)}" target="_blank" rel="noopener" data-no-i18n title="${esc(b.title)}">${esc(String(b.title || "").replace(/ - .*$/, ""))} · ${esc(shortRound(b.title, b.slug))} JST</a></div>
     <div class="bet">
       <div><div class="k">Side</div><div class="v">${sideHtml(b.side)}</div></div>
       <div><div class="k">Price</div><div class="v num">${(+b.price).toFixed(3)}</div></div>
@@ -1088,7 +1088,7 @@ function betPanel(s) {
       <div><div class="k">Cost (fee ${money(b.fee)})</div><div class="v num">${money(b.cost)}</div></div>
       <div><div class="k">A win pays</div><div class="v num pos">${money(b.shares)} <small>(${money(b.win_profit, true)})</small></div></div>
       <div><div class="k">${ended ? "Round ended" : "Ends in"}</div><div class="v num">${ended ? "⏳ result soon" : secs(b.ends_in)}</div></div>
-      <div><div class="k">Round volume${b.volume?.lagging ? " (Polymarket, delayed)" : b.volume?.partial ? ` since ${new Date(b.volume.since * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"})}` : ""}</div>
+      <div><div class="k">Round volume${b.volume?.lagging ? " (Polymarket, delayed)" : b.volume?.partial ? ` since ${jstFull(b.volume.since).slice(11)}` : ""}</div>
         <div class="v num">${b.volume == null ? "–" : money(b.volume.usd)}${b.volume?.trades ? ` <small class="muted" style="font-weight:400">${b.volume.trades.toLocaleString()} trades · ${sharesTxt(b.volume.shares)} sh</small>` : ""}</div></div>
     </div>
     ${b.price_to_beat && b.coin_price && !ended ? coinVsBeat(s.coin, b.coin_price, b.price_to_beat) : ""}
@@ -1196,7 +1196,7 @@ function simLogHtml(r) {
     // the same columns, order and look as the bot's History; Volume isn't in the replay's data
     return `<tr data-hk="${esc(hk)}" class="${histMarked.has(hk) ? "rd-mark" : ""}"><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td>
       <td class="l num">${placed ? jst(placed).slice(6) : dash}</td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
-      <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(shortRound(title))}</a>` : dash}${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
+      <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(shortRound(title, t.slug))}</a>` : dash}${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
       <td class="num" title="Not in the replay's data">${dash}</td><td class="num">${t.round ? `${t.end - t.round - t.at}s` : dash}</td>
       <td class="l">${t.side ? sideHtml(t.side) : dash}</td>${moveDiffTd(t, t.move_bet)}${moveDiffTd(t, t.move_end)}<td class="num">${stepTxt(t.step, t.win)}</td>
       <td class="num">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
@@ -1265,8 +1265,17 @@ function renderLadder() {
   </table>`;
 }
 // the bets, newest first, with Resets and settings changes in between (by time)
-// "Bitcoin Up or Down - November 13, 10:15AM-10:20AM ET" -> "Nov 13 10:15-10:20AM" (the full title is the tooltip)
-function shortRound(title) {
+// JST, 24-hour: "2026-11-18 00:35:32" from unix seconds (slice it for less)
+const jstFull = ts => new Date((ts + 9 * 3600) * 1000).toISOString().slice(0, 19).replace("T", " ");
+const ROUND_SEC = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400};
+// a round in JST, 24-hour, from its slug ("btc-updown-5m-<start>"): "11-14 00:15-00:20" (Polymarket's own
+// US-Eastern title is the tooltip); without such a slug, the title shortened: "Nov 13 10:15-10:20AM"
+function shortRound(title, slug) {
+  const m5 = String(slug || "").match(/-(\d+[mh])-(\d{9,})$/);
+  if (m5 && ROUND_SEC[m5[1]]) {
+    const a = jstFull(+m5[2]), b = jstFull(+m5[2] + ROUND_SEC[m5[1]]);
+    return `${a.slice(5, 10)} ${a.slice(11, 16)}-${b.slice(11, 16)}`;
+  }
   const t = String(title || "").replace(/^.*? - /, "");
   const m = t.match(/^([A-Z][a-z]{2})[a-z]* (\d+),? (.*?)(?: ET)?$/);
   if (!m) return t;
@@ -1374,7 +1383,7 @@ function historyTable(trades, events = [], total = trades.length) {
   };
   let n = total;                         // bets numbered from the oldest (#1); log rows get no number
   return `${historyHead()}
-    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="20">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : t.kind === "result_fixed" ? "⚠️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr data-hk="${esc(histKey(t))}" class="${histMarked.has(histKey(t)) ? "rd-mark" : ""}"><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td>${betAtTd(t)}<td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a>${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
+    ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="20">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : t.kind === "result_fixed" ? "⚠️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr data-hk="${esc(histKey(t))}" class="${histMarked.has(histKey(t)) ? "rd-mark" : ""}"><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td>${betAtTd(t)}<td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title, t.round))}</a>${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
       <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}<td class="num">${stepTxt(t.step, t.side === t.result)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
@@ -1502,7 +1511,7 @@ function usersHtml(users) {
   const state = u => u.disabled ? '<span class="neg">disabled</span>' : !u.approved ? '<b style="color:var(--amber)">⏳ waiting</b>' : '<span class="pos">approved</span>';
   const rows = [...users].sort((a, b) => (a.approved || a.disabled) - (b.approved || b.disabled));   // waiting first
   return `<table><tr><th class="l">Email</th><th class="l">Status</th><th class="l">Country</th><th>Bots</th><th>Running</th><th>Live running</th><th class="l">Last sign-in</th><th class="l"></th></tr>
-    ${rows.map(u => `<tr><td class="l" data-no-i18n>${esc(u.email)}</td><td class="l">${state(u)}</td><td class="l">${esc(u.country)}</td><td class="num">${u.bots}</td><td class="num">${u.running}</td><td class="num">${u.live_running}</td><td class="l num">${u.last_login ? new Date(u.last_login * 1000).toLocaleString() : "–"}</td><td class="l">${act(u)}</td></tr>`).join("")}</table>`;
+    ${rows.map(u => `<tr><td class="l" data-no-i18n>${esc(u.email)}</td><td class="l">${state(u)}</td><td class="l">${esc(u.country)}</td><td class="num">${u.bots}</td><td class="num">${u.running}</td><td class="num">${u.live_running}</td><td class="l num">${u.last_login ? jstFull(u.last_login).slice(0, 16) : "–"}</td><td class="l">${act(u)}</td></tr>`).join("")}</table>`;
 }
 async function showUsers() {
   try {
@@ -1549,7 +1558,7 @@ function ahRender() {
   $("#ahBets").innerHTML = `<table><tr><th class="l">Paid out</th><th class="l">Bet at</th><th class="l">Bot</th><th class="l">Round</th><th class="l">Bet</th><th>Step</th><th>Price</th><th>Shares</th><th>Cost</th><th>Fee</th><th class="l">Result</th><th>Payout</th><th>Net</th><th>Bot total</th></tr>
     ${rows.map(t => { const won = t.result && t.result === t.side;
       return `<tr data-hk="${esc(t.bot + "|" + t.round)}" class="${histMarked.has(t.bot + "|" + t.round) ? "rd-mark" : ""}"><td class="l num">${esc(t.time)}</td><td class="l num">${esc((t.placed || "").slice(11))}</td><td class="l" data-no-i18n>${esc(t.bot_name)}</td>
-      <td class="l"><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc((t.title || t.round).replace(/^.*? - /, ""))}</a></td>
+      <td class="l"><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title || "")}">${esc(shortRound(t.title || t.round, t.round))}</a></td>
       <td class="l">${sideHtml(t.side)}</td><td class="num">${stepTxt(t.step, won)}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
       <td class="num">${money(t.cost)}</td><td class="num">${money(t.fee)}</td><td class="l">${t.result ? (won ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>') : "–"}</td>
       <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td><td class="num ${tone(t.total_pnl)}">${money(t.total_pnl, true)}</td></tr>`; }).join("")}</table>`;
@@ -1630,7 +1639,7 @@ function rdRender() {
   $("#rdTable").innerHTML = `<table><tr><th class="l">Start</th><th class="l">Round</th><th class="l">Result</th><th>Beat</th><th>Final</th><th>Final move</th>
     ${L.map(s => `<th>Up @${leftTxt(s)}</th>`).join("")}${L.map(s => `<th>Move @${leftTxt(s)}</th>`).join("")}<th>High</th><th>Low</th><th class="l">${any ? "Leader (first match)" : `Leader @${leftTxt(L[at])}`}</th></tr>
     ${rows.slice(0, 3000).map(r => { const p = pick.get(r.slug);
-      return `<tr data-slug="${esc(r.slug)}" class="${rdMarked.has(r.slug) ? "rd-mark" : ""}"><td class="l num">${jst(r.start)}</td><td class="l"><a href="https://polymarket.com/event/${esc(r.slug)}" target="_blank" rel="noopener" title="${esc(r.slug)}">${esc(shortRound(etTitle(r.start, r.start + (rd.timeframe === "15m" ? 900 : 300))))}</a></td>
+      return `<tr data-slug="${esc(r.slug)}" class="${rdMarked.has(r.slug) ? "rd-mark" : ""}"><td class="l num">${jst(r.start)}</td><td class="l"><a href="https://polymarket.com/event/${esc(r.slug)}" target="_blank" rel="noopener" title="${esc(r.slug)}">${esc(shortRound(etTitle(r.start, r.start + (rd.timeframe === "15m" ? 900 : 300)), r.slug))}</a></td>
       <td class="l">${sideHtml(r.result)}</td><td class="num">${usd(r.beat)}</td><td class="num">${usd(r.final)}</td>
       <td class="num ${r.beat == null ? "" : tone(r.final - r.beat)}">${r.beat == null ? "–" : money(r.final - r.beat, true)}</td>
       ${r.up.map((u, i) => `<td class="num ${i === (any ? p?.i : at) ? "ldr" : ""}">${u == null ? "–" : u.toFixed(2)}</td>`).join("")}
