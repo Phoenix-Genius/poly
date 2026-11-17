@@ -452,6 +452,10 @@ class Bot:
                       f"Polymarket's official result is checked when it comes)" if fast else "",
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
                       abs(self.ladder.pnl))
+        if won and self.ladder.forgiven:
+            self.log.info("Streak cleared: forgave the $%.2f left over (under the Profit per win) after %d win(s) "
+                          "in a row (Recover over %d wins)", self.ladder.forgiven, self.cfg.recover_wins,
+                          self.cfg.recover_wins)
         if won and self.ladder.streak_lost > 0:
             self.log.info("Still to win back from the streak: $%.2f over %d more win(s) (Recover over %d wins)",
                           self.ladder.streak_lost, self.ladder.wins_left, self.cfg.recover_wins)

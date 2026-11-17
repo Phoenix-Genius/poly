@@ -211,6 +211,21 @@ class RecoverOverWinsTest(unittest.TestCase):
         lad.record("down", True, 23.5, 2)
         self.assertEqual((lad.step, lad.streak_lost, lad.wins_left, lad.base), (1, 0, 0, 0))
 
+    def test_last_win_forgives_a_small_leftover(self):
+        lad = Ladder()
+        lad.record("up", False, -10, 2, base_profit=2.5)
+        lad.record("up", False, -20, 2, base_profit=2.5)                   # 30 owed, over 2 wins
+        lad.record("up", True, 17.5, 2, base_profit=2.5)                   # pays back 15
+        self.assertEqual((lad.streak_lost, lad.wins_left, lad.forgiven), (15, 1, 0))
+        lad.record("up", True, 17.18, 2, base_profit=2.5)                  # a dearer fill: 14.68 back, 0.32 left
+        self.assertEqual((lad.step, lad.streak_lost, lad.wins_left), (1, 0, 0))   # the 2nd win ends the cycle
+        self.assertAlmostEqual(lad.forgiven, 0.32)
+        lad.record("up", False, -10, 2, base_profit=2.5)
+        lad.record("up", True, 7.5, 2, base_profit=2.5)                    # first of 2: a leftover is carried
+        lad.record("up", True, 4.0, 2, base_profit=2.5)                    # 2nd, but 3.5 short: over the Profit
+        self.assertAlmostEqual(lad.streak_lost, 3.5)                       # per win, so still owed
+        self.assertEqual((lad.wins_left, lad.forgiven), (1, 0))
+
     def test_one_win_is_the_old_behaviour(self):
         lad = Ladder()
         lad.record("up", False, -10)

@@ -4,6 +4,31 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.10] - 2026-11-18
+
+### History Step column follows the recovery cycle (Recover over 2+ wins)
+- **What:** in the bot's History, the all-bots History and the simulation's run 1, with Recover over 2 or more wins
+  each recovery cycle (a loss until everything is won back) gets a bar in the Step cell: paid-back cycles blue and
+  amber in turn, the one still owed red. Wins inside a cycle show their step; the win that ends a cycle of several
+  wins shows the cycle's bets, bold ("*14"). Recover over 1 keeps the plain rule (a win at step 2+, bold). The Step
+  column now sits after Payout in all three tables. "Ladder ended" rows span the table exactly.
+- **Why:** the owner wanted to see each Recover over 2 cycle and where it ends.
+- **How:** `cycleMarks()` replays the bot's own ladder rule over the rows (oldest first; Reset / ladder end close a
+  cycle) with the bot's Profit per win and Recover over; `stepTd()` draws the cell.
+- **Tests:** checked on Alpaca's log (the replay ends owing the same $2.59 as the bot's state; cycles #856–#860 and
+  #865–#878 = *14) and random+recover2 (#724–#735 = *12, #736–#742 = *7); every row has the header's 22 cells.
+
+### The N-th win in a row ends the cycle: a small leftover is forgiven
+- **What:** with Recover sizing, the win that should finish a cycle (the N-th in a row since the last loss) now
+  forgives a leftover smaller than the Profit per win (a dearer fill or a fee), so 2 straight wins always end a
+  Recover over 2 cycle. A bigger leftover is still carried; a loss in between still spreads the debt over N wins.
+  The log says "Streak cleared: forgave the $0.32 left over …".
+- **Why:** random+recover2's #734–#735 won twice in a row but $0.32 short, so the cycle stayed open and the next loss
+  piled onto it; the owner expects 2 straight wins to finish a Recover over 2 cycle.
+- **How:** `Ladder.record` (strategy.py) clears the streak when `left <= 1` and what's left is under `base_profit`
+  (`Ladder.forgiven` for the log); engine.py logs it. The simulator already ends a cycle at the N-th straight win.
+- **Tests:** tests/test_strategy.py `test_last_win_forgives_a_small_leftover`; full suite (160) passes.
+
 ## [1.4.9] - 2026-11-18
 
 ### Times in JST, 24-hour

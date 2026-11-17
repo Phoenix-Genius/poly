@@ -194,13 +194,17 @@ class Ladder:
     rounds_bet: int = 0            # bets placed since Reset (for the alternate side mode)
     base: float = 0.0              # Steps to survive: this streak's Profit per win / Starting bet (0 = settings')
     wins_left: int = 0             # Recover over N wins: wins still needed to clear streak_lost (0 = N)
+    forgiven: float = 0.0          # the small leftover the last win forgave (0 = none), for the log
 
     def record(self, side: str, won: bool, profit: float, recover_wins: int = 1,
                base_profit: Optional[float] = None) -> None:
         """base_profit (recover sizing): the Profit per win the bet was sized for. A win then pays back only what
         it really earned over that, so a fill dearer than planned (slippage) leaves the shortfall owed instead of
-        writing it off. None (multiply sizing): a win clears the streak, as before."""
+        writing it off. None (multiply sizing): a win clears the streak, as before.
+        The N-th win in a row ends the cycle: a leftover smaller than the Profit per win (a dearer fill or fee) is
+        forgiven there instead of keeping the cycle open (a later loss would otherwise pile onto it)."""
         self.pnl += profit
+        self.forgiven = 0.0
         self.last_side, self.last_won = side, won
         if won:
             self.wins += 1
@@ -216,7 +220,9 @@ class Ladder:
                     self.wins_left = left - 1
             else:
                 self.streak_lost -= max(0.0, profit - base_profit)
-                if self.streak_lost <= 0.005:
+                if self.streak_lost > 0.005 and left <= 1 and self.streak_lost < base_profit:
+                    self.forgiven = round(self.streak_lost, 4)   # the N-th straight win: a small leftover is let go
+                if self.streak_lost <= 0.005 or self.forgiven:
                     self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
                 else:                             # still owed (planned share or a short win): carry it
                     self.wins_left = max(1, left - 1)
