@@ -4,6 +4,20 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.14] - 2026-11-18
+
+### Compact top of the bot list, the round's time left
+- **What:** History, Rounds and "+ New" share one row of small buttons; "Bots 27" is smaller with the running count and
+  the Paper / Live totals flowing after it as plain text ("Paper P&L" / "Live P&L" shortened to "Paper" / "Live",
+  full words in the tooltips). The round panel's title shows the time left in the round ("⏱ 1:36 left"), ticking
+  every second. The bot cards no longer show the coin's move pill (it's in the round panel on top): an open bet
+  reads "step 1 · ▲ $2.64 · 64%".
+- **Why:** the owner wanted the top of the bot list as compact as the cards, the round's time left at a glance, and
+  no repeat of the move on every card.
+- **How:** sidebar markup and CSS; `leftClock()` + a 1 s ticker for `.mkt-left`; `bet_move` dropped from
+  `Controller.summary()`.
+- **Tests:** full suite passes; the header rendered with the page's CSS in headless Chromium.
+
 ## [1.4.13] - 2026-11-18
 
 ### Compact bot cards with the open bet's move and chance

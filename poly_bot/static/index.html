@@ -64,19 +64,22 @@
 
   /* bot list: cards on the tinted sidebar, a stripe for the state (green running, red halted, grey stopped) */
   #leftScroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-  .side-tools { display: flex; gap: 6px; }
-  .side-tools .btn { flex: 1; padding: 5px 8px; white-space: nowrap; }
-  #side { padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
-  .side-head { display: flex; align-items: center; gap: 8px; }
-  .side-head h2 { margin: 0; font-size: 17px; }
-  .side-head .btn { padding: 6px 12px; font-weight: 600; }
-  .side-totals { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px; }
-  .side-totals > span { background: var(--panel); border: 1px solid var(--line); padding: 1px 8px; }
+  /* the top of the bot list, compact: History · Rounds · New in one row; "Bots 27" with the totals in one line */
+  .side-tools { display: flex; gap: 4px; }
+  .side-tools .btn { flex: 1; padding: 3px 6px; font-size: 12px; white-space: nowrap; }
+  .side-tools .btn.primary { flex: none; font-weight: 600; }
+  #side { padding: 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .side-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
+  .side-head h2 { margin: 0; font-size: 14px; }
+  .side-head .side-totals { display: contents; }   /* the totals flow on after "Bots 27" */
+  .side-totals > span { font-size: 11px; color: var(--muted); }
+  .side-totals > span { white-space: nowrap; }
   .side-totals b { color: var(--text); }
   /* the top of the bot list: the round now, like the Current bet's Price To Beat / BTC now */
   .side-mkt { margin-top: 6px; background: var(--panel); border: 1px solid var(--line); padding: 5px 8px; font-size: 12px;
               font-variant-numeric: tabular-nums; }
   .side-mkt .k { color: var(--muted); font-size: 11px; }
+  .side-mkt .mkt-left b { color: var(--text); font-variant-numeric: tabular-nums; }
   .side-mkt .row { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
   .side-mkt .row b { font-weight: 700; }
   b.hl, .side-mkt b.hl { padding: 0 4px; border-radius: 3px; font-weight: 700; }
@@ -375,10 +378,9 @@
     <div id="leftScroll"><div id="side">
       <div id="whoBox" hidden><span class="who" id="who" data-no-i18n></span><span class="spacer"></span>
         <button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>Sign out</button></div>
-      <div class="side-tools"><button class="btn" id="allHistBtn" title="Every bot's results and bets in one table">📋 History</button><button class="btn" id="roundsBtn" title="Polymarket's past rounds: results, prices and moves, for research">🔎 Rounds</button></div>
-      <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><span class="spacer"></span>
-        <button class="btn primary" id="newBot" title="Create a paper or live bot">＋ New bot</button></div>
-      <div class="side-totals" id="sideTotals"></div>
+      <div class="side-tools"><button class="btn" id="allHistBtn" title="Every bot's results and bets in one table">📋 History</button><button class="btn" id="roundsBtn" title="Polymarket's past rounds: results, prices and moves, for research">🔎 Rounds</button>
+        <button class="btn primary" id="newBot" title="Create a paper or live bot">＋ New</button></div>
+      <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><div class="side-totals" id="sideTotals"></div></div>
       <div id="sideMarket"></div>
       <nav id="bots"></nav>
     </div></div>
@@ -562,10 +564,14 @@ function wireBotOrder() {
   });
 }
 let markets = [];          // the round each coin/round length is on now (the top of the bot list)
+// the round panel's countdown: "⏱ 1:36 left", ticking every second between the list's 4 s reloads
+const leftClock = end => { const s = Math.max(0, Math.round(end - Date.now() / 1000));
+  return s ? `⏱ <b>${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}</b> left` : "⏱ ended"; };
+setInterval(() => { for (const el of document.querySelectorAll(".mkt-left")) el.innerHTML = leftClock(+el.dataset.end); }, 1000);
 function renderMarkets() {
   $("#sideMarket").innerHTML = markets.map(m => {
-    const d = m.now - m.beat, ts = +String(m.slug).split("-").pop();
-    const span = ts ? ` · ${jstFull(ts).slice(11, 16)}–${jstFull(ts + (ROUND_SEC[m.timeframe] || 300)).slice(11, 16)}` : "";
+    const d = m.now - m.beat, ts = +String(m.slug).split("-").pop(), end = ts + (ROUND_SEC[m.timeframe] || 300);
+    const span = ts ? ` · ${jstFull(ts).slice(11, 16)}–${jstFull(end).slice(11, 16)} · <span class="mkt-left" data-end="${end}" title="Time left in this round">${leftClock(end)}</span>` : "";
     return `<div class="side-mkt" title="The round the running bots are on: ${esc(m.coin)} now against its Price To Beat (60 s TWAPs, as the bots decide)">
       <div class="k">${esc(m.coin)} ${esc(m.timeframe)}${span}</div>
       <div class="row"><span>Beat <b>${moneyFull(m.beat)}</b></span><span>Now <b>${moneyFull(m.now)}</b></span>
@@ -599,20 +605,18 @@ function renderBots() {
   $("#sideCount").textContent = bots.length || "";
   renderMarkets();
   $("#sideTotals").innerHTML = `<span><span class="dot run"></span> ${running} running</span>` +
-    `<span>Paper P&amp;L <b class="${tone(sum(b => b.network !== "live"))}">${money(sum(b => b.network !== "live"), true)}</b></span>` +
-    (live ? `<span>Live P&amp;L <b class="${tone(sum(b => b.network === "live"))}">${money(sum(b => b.network === "live"), true)}</b></span>` : "");
+    `<span title="Paper bots' profit since Reset, added up">Paper <b class="${tone(sum(b => b.network !== "live"))}">${money(sum(b => b.network !== "live"), true)}</b></span>` +
+    (live ? `<span title="Live bots' profit since Reset, added up">Live <b class="${tone(sum(b => b.network === "live"))}">${money(sum(b => b.network === "live"), true)}</b></span>` : "");
   document.body.classList.toggle("no-bots", !bots.length);
   $("#bots").innerHTML = bots.map(b => {
     const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
     const act = b.locked ? "" : b.running
       ? `<button class="bi-act" data-stop="${esc(b.id)}" title="${b.stop_after_win ? "Stops after the next win (click to change)" : "Stop this bot: right away or after a win"}" aria-label="Stop"><span class="stop">■</span>${b.stop_after_win ? " after win" : ""}</button>`
       : `<button class="bi-act" data-start="${esc(b.id)}" title="Start this bot" aria-label="Start"><span class="go">▶</span></button>`;
-    // an open bet: its side as a red arrow, its cost, the coin's move from the Price To Beat and the win chance
+    // an open bet: its side as a red arrow, its cost and the win chance (the coin's move is on top of the list)
     const chance = b.bet_side && b.bet_chance != null
       ? ` · <b class="hl ${b.bet_chance >= 0.5 ? "pos" : "neg"}" title="Win chance now: the market's price of ${b.bet_side.toUpperCase()}">${Math.round(b.bet_chance * 100)}%</b>` : "";
-    const move = b.bet_side && b.bet_move != null
-      ? ` · <b class="hl ${b.bet_move >= 0 ? "pos" : "neg"}" title="${esc(b.coin)} now against the round's Price To Beat">${b.bet_move >= 0 ? "▲" : "▼"} ${money(Math.abs(b.bet_move))}</b>` : "";
-    const next = b.bet_side ? `<span class="bi-bet"><span class="bi-side" title="Bet ${b.bet_side.toUpperCase()}">${b.bet_side === "up" ? "▲" : "▼"}</span> <b>${money(b.bet_cost)}</b>${move}${chance}</span>` : `🎯 next <b>${money(b.next_cost)}</b>`;
+    const next = b.bet_side ? `<span class="bi-bet"><span class="bi-side" title="Bet ${b.bet_side.toUpperCase()}">${b.bet_side === "up" ? "▲" : "▼"}</span> <b>${money(b.bet_cost)}</b>${chance}</span>` : `🎯 next <b>${money(b.next_cost)}</b>`;
     return `<div class="bot-item st-${st} ${b.id === current ? "active" : ""} ${b.bet_side && b.bet_chance != null ? (b.bet_chance >= 0.5 ? "bet-win" : "bet-lose") : ""}" data-id="${esc(b.id)}" draggable="true" tabindex="0"
          title="Drag to reorder · Alt+↑/↓ moves the selected bot">
       <div class="bi-top"><span class="dot ${st === "stop" ? "" : st}" title="${esc(b.message || "")}"></span><span class="bi-name" data-no-i18n title="${esc(b.name)} · ${esc(b.coin)} ${esc(b.timeframe)} rounds${b.message ? " · " + esc(b.message) : ""}">${esc(b.name)}</span>

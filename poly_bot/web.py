@@ -421,9 +421,6 @@ class Controller:
                "bet_chance": self.bet_chance(),
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
                "budget": self.cfg.budget > 0}
-        # an open bet's round still running: the coin now against its Price To Beat (the card's move)
-        if b.bet and b.bet.get("price_to_beat") and b.live.get("coin_price") and time.time() < b.bet.get("end", 0):
-            out["bet_move"] = round(b.live["coin_price"] - b.bet["price_to_beat"], 2)
         if full:
             phase, message = self._phase()
             bal = self.balance()
