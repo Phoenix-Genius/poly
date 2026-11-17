@@ -1181,7 +1181,7 @@ function simLogHtml(r) {
     const costs = t.cost ? ((t.fee + slip) / t.cost * 100).toFixed(1) + "%" : dash;
     return `<tr><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
       <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)} · bought ${t.at}s in">${esc(shortRound(title))}</a>` : dash}</td>
-      <td class="l">${t.side ? sideHtml(t.side) : dash}</td><td class="num">${t.step}</td>
+      <td class="l">${t.side ? sideHtml(t.side) : dash}</td><td class="num">${stepTxt(t.step, t.win)}</td>
       <td class="num" title="The replay's price (1-minute history)">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num" title="With the price gap your bots really pay">${(+t.price).toFixed(3)}</td>
       <td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg" title="The price gap">${slip > 0.005 ? money(-slip) : "$0.00"}</td><td class="num neg">${money(-t.fee)}</td><td class="num">${costs}</td>
@@ -1311,6 +1311,8 @@ function moveTd(t, price, beat) {
   return `<td class="num ${good ? "pos" : "neg"}" title="${esc((+price).toFixed(2))} vs ${esc((+beat).toFixed(2))}">${d >= 0 ? "+" : "−"}$${Math.abs(d).toFixed(2)}</td>`;
 }
 // History: when the bet was bought (JST) and how long was left in its round then
+// a History Step cell: only the ladder's last step, i.e. a win at step 2+ that ended a losing streak (bold); else empty
+function stepTxt(step, won) { return won && +step > 1 ? `<b>${esc(step)}</b>` : ""; }
 function betAtTd(t) {
   return t.placed ? `<td class="l num" title="Bought at ${esc(t.placed)} JST">${esc(t.placed.slice(11, 19))}</td>` : '<td class="l num"><span class="muted">–</span></td>';
 }
@@ -1351,7 +1353,7 @@ function historyTable(trades, events = [], total = trades.length) {
       <th title="Paid above the best price because the bet walked the order book">Slippage</th><th title="Polymarket's fee on this bet">Fee</th><th title="Fee and slippage as a share of the bet">Costs</th>
       <th class="l">Result</th><th>Payout</th><th>Net</th><th>Total</th><th>Balance</th></tr>
     ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="20">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : t.kind === "result_fixed" ? "⚠️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr data-hk="${esc(histKey(t))}" class="${histMarked.has(histKey(t)) ? "rd-mark" : ""}"><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td>${betAtTd(t)}<td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title))}</a>${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
-      <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}<td class="num">${esc(t.step)}</td>
+      <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}<td class="num">${stepTxt(t.step, t.side === t.result)}</td>
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
       <td class="l">${t.side === t.result ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
@@ -1526,7 +1528,7 @@ function ahRender() {
     ${rows.map(t => { const won = t.result && t.result === t.side;
       return `<tr data-hk="${esc(t.bot + "|" + t.round)}" class="${histMarked.has(t.bot + "|" + t.round) ? "rd-mark" : ""}"><td class="l num">${esc(t.time)}</td><td class="l num">${esc((t.placed || "").slice(11))}</td><td class="l" data-no-i18n>${esc(t.bot_name)}</td>
       <td class="l"><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener">${esc((t.title || t.round).replace(/^.*? - /, ""))}</a></td>
-      <td class="l">${sideHtml(t.side)}</td><td class="num">${esc(t.step)}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
+      <td class="l">${sideHtml(t.side)}</td><td class="num">${stepTxt(t.step, won)}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td>
       <td class="num">${money(t.cost)}</td><td class="num">${money(t.fee)}</td><td class="l">${t.result ? (won ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>') : "–"}</td>
       <td class="num">${money(t.payout)}</td><td class="num ${tone(t.pnl)}"><b>${money(t.pnl, true)}</b></td><td class="num ${tone(t.total_pnl)}">${money(t.total_pnl, true)}</td></tr>`; }).join("")}</table>`;
 }

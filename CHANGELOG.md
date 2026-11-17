@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-11-17
+
+### History Step column shows only a ladder's last step
+- **What:** in the bot's History, the all-bots History and the Rounds replay, Step shows only the step of a win at
+  step 2+ (the bet that ended a losing streak), in bold; every other row is blank.
+- **Why:** the owner wanted the streak-ending steps to stand out.
+- **How:** `stepTxt(step, won)` in `static/index.html`.
+- **Tests:** UI only; the page's script parses (node --check).
+
 ## [1.4.6] - 2026-11-17
 
 ### Bet mode tile shows how bets are sized
