@@ -367,14 +367,11 @@ class EngineTest(unittest.TestCase):
         lad.record("up", False, -75.45, 2, 2.5)
         lad.record("up", False, -155.03, 2, 2.5)        # owes 230.48; each of 2 wins should pay 115.24 + 2.5
         lad.record("up", True, 65.17, 2, 2.5)           # slippage: the win earned 65.17, not 117.74
-        self.assertAlmostEqual(lad.streak_lost, 230.48 - 62.67, places=6)
+        self.assertAlmostEqual(lad.streak_lost, 230.48 - 62.67, places=6)   # the 1st of 2 carries its shortfall
         self.assertEqual(lad.wins_left, 1)
-        lad.record("up", True, 123.07, 2, 2.5)          # sized for half; still short, so the rest stays owed
-        self.assertAlmostEqual(lad.streak_lost, 167.81 - 120.57, places=6)
-        self.assertEqual(lad.wins_left, 1)
-        lad.record("up", True, 47.24 + 2.5, 2, 2.5)
-        self.assertEqual(lad.streak_lost, 0)
-        self.assertEqual(lad.wins_left, 0)
+        lad.record("up", True, 123.07, 2, 2.5)          # the 2nd win in a row ends the cycle (owner's rule, v1.4.11):
+        self.assertEqual((lad.streak_lost, lad.wins_left), (0, 0))   # the 47.24 still short is forgiven
+        self.assertAlmostEqual(lad.forgiven, 167.81 - 120.57, places=6)
 
     def test_until_earn_counts_since_reset_not_start(self):
         bot = self.make(stop_profit_usd=4)

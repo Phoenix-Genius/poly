@@ -4,6 +4,31 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.11] - 2026-11-18
+
+### The N-th win in a row always ends the cycle
+- **What:** with Recover over N wins, the N-th win in a row since the last loss now always ends the cycle: whatever
+  is still owed then (slippage, a bigger fee) is forgiven and logged ("Streak cleared: forgave the $4.11 left over
+  (slippage/fees) after 2 win(s) in a row"). v1.4.10 forgave only leftovers under the Profit per win. The first of
+  the N wins still carries its shortfall; a loss in between still spreads the debt over N wins again. History's
+  Step column uses the same rule.
+- **Why:** Manta's #226–#227 won twice in a row but #227 came up $4.11 short (more than the $2 Profit per win), so
+  the cycle stayed open; the owner chose that N straight wins always finish a cycle. Cost: the closing win's
+  shortfall is written off (usually a few dollars; a very bad live fill could leave more, e.g. $47.24 in the
+  test's real-world example).
+- **How:** `Ladder.record` (strategy.py) clears the streak when `left <= 1`; `cycleMarks()` in the page ends a
+  cycle there too.
+- **Tests:** tests/test_strategy.py `test_last_win_forgives_a_small_leftover` and tests/test_engine.py
+  `test_short_win_keeps_the_shortfall_owed` updated to the new rule; full suite (160) passes. On Manta's log the
+  page shows #213–#227 as one cycle, *15.
+
+### History's header row stays in view
+- **What:** the bot's History scrolls in its own box (up to 75% of the window) with its header row fixed at the
+  top, like the simulation's and the all-bots History's.
+- **Why:** the owner wanted the column names visible while scrolling a long History.
+- **How:** CSS: `#historyPanel .scroll` max-height + overflow, `#historyPanel th` sticky.
+- **Tests:** UI only; the page's script parses.
+
 ## [1.4.10] - 2026-11-18
 
 ### History Step column follows the recovery cycle (Recover over 2+ wins)

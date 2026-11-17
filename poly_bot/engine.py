@@ -453,7 +453,7 @@ class Bot:
                       "+" if profit >= 0 else "-", abs(profit), "+" if self.ladder.pnl >= 0 else "-",
                       abs(self.ladder.pnl))
         if won and self.ladder.forgiven:
-            self.log.info("Streak cleared: forgave the $%.2f left over (under the Profit per win) after %d win(s) "
+            self.log.info("Streak cleared: forgave the $%.2f left over (slippage/fees) after %d win(s) "
                           "in a row (Recover over %d wins)", self.ladder.forgiven, self.cfg.recover_wins,
                           self.cfg.recover_wins)
         if won and self.ladder.streak_lost > 0:

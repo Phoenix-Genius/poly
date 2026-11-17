@@ -201,8 +201,8 @@ class Ladder:
         """base_profit (recover sizing): the Profit per win the bet was sized for. A win then pays back only what
         it really earned over that, so a fill dearer than planned (slippage) leaves the shortfall owed instead of
         writing it off. None (multiply sizing): a win clears the streak, as before.
-        The N-th win in a row ends the cycle: a leftover smaller than the Profit per win (a dearer fill or fee) is
-        forgiven there instead of keeping the cycle open (a later loss would otherwise pile onto it)."""
+        The N-th win in a row always ends the cycle: whatever is still owed then (a dearer fill or fee) is forgiven
+        instead of keeping the cycle open (a later loss would otherwise pile onto it); the owner's rule since v1.4.11."""
         self.pnl += profit
         self.forgiven = 0.0
         self.last_side, self.last_won = side, won
@@ -220,8 +220,8 @@ class Ladder:
                     self.wins_left = left - 1
             else:
                 self.streak_lost -= max(0.0, profit - base_profit)
-                if self.streak_lost > 0.005 and left <= 1 and self.streak_lost < base_profit:
-                    self.forgiven = round(self.streak_lost, 4)   # the N-th straight win: a small leftover is let go
+                if self.streak_lost > 0.005 and left <= 1:
+                    self.forgiven = round(self.streak_lost, 4)   # the N-th straight win: any leftover is let go
                 if self.streak_lost <= 0.005 or self.forgiven:
                     self.streak_lost, self.base, self.wins_left = 0.0, 0.0, 0
                 else:                             # still owed (planned share or a short win): carry it

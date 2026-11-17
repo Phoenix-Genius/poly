@@ -321,6 +321,9 @@
      differ, colour-blind safe), the one still owed red */
   td.cyc-a { box-shadow: inset 3px 0 0 #3b82f6; } td.cyc-b { box-shadow: inset 3px 0 0 #f59e0b; }
   td.cyc-open { box-shadow: inset 3px 0 0 var(--red); }
+  /* History: the table scrolls in its own box, its header row stays at the top (like the simulation's) */
+  #historyPanel .scroll { max-height: 75vh; overflow: auto; }
+  #historyPanel th { position: sticky; top: 0; z-index: 1; background: var(--section-bg); }
   .simlog th { position: sticky; top: 0; z-index: 1; background: var(--section-bg); }   /* header stays while the table scrolls */
   #roundsDlg .ah-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
   #roundsDlg .ah-bets { max-height: 55vh; }
@@ -1347,8 +1350,8 @@ function moveDiffTd(t, d) {
 // History: when the bet was bought (JST) and how long was left in its round then
 // History's Step column follows the recovery cycle, worked out like the bot's own ladder (strategy.py Ladder):
 // a loss adds its cost to what is owed; with Recover sizing a win pays back what it earned above the Profit per win,
-// and the cycle ends when nothing is owed, or at the N-th win in a row when what is left is under the Profit per win
-// (a dearer fill or fee; the bot forgives it since v1.4.10) — a loss in between spreads the debt over N wins again; with Multiply sizing it ends at the N-th win since the last loss.
+// and the cycle ends when nothing is owed, or at the N-th win in a row whatever is left (a dearer fill or fee; the
+// bot forgives it since v1.4.11) — a loss in between spreads the debt over N wins again; with Multiply sizing it ends at the N-th win since the last loss.
 // See stepTd for what the Step cell shows. rows: oldest first; closes(t): a Reset / ladder end drops what is owed.
 function cycleMarks(rows, won, closes = () => false, settings = {}) {
   const base = settings.sizing === "multiply" ? null : +settings.base_profit_usd || 0;
@@ -1369,7 +1372,7 @@ function cycleMarks(rows, won, closes = () => false, settings = {}) {
       left = end ? 0 : l - 1;
     } else {
       owed -= Math.max(0, p - base);
-      end = owed <= 0.005 || (left || n) <= 1 && owed < base;   // the N-th straight win forgives a leftover under the Profit per win
+      end = owed <= 0.005 || (left || n) <= 1;            // the N-th straight win ends it (any leftover is forgiven)
       if (end) { owed = 0; left = 0; } else left = Math.max(1, (left || n) - 1);
     }
     marks.set(t, {won: true, end, bets, wins, cyc});

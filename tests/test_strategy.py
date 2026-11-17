@@ -222,8 +222,12 @@ class RecoverOverWinsTest(unittest.TestCase):
         self.assertAlmostEqual(lad.forgiven, 0.32)
         lad.record("up", False, -10, 2, base_profit=2.5)
         lad.record("up", True, 7.5, 2, base_profit=2.5)                    # first of 2: a leftover is carried
-        lad.record("up", True, 4.0, 2, base_profit=2.5)                    # 2nd, but 3.5 short: over the Profit
-        self.assertAlmostEqual(lad.streak_lost, 3.5)                       # per win, so still owed
+        lad.record("up", True, 4.0, 2, base_profit=2.5)                    # 2nd, 3.5 short: still the end
+        self.assertEqual((lad.streak_lost, lad.wins_left), (0, 0))         # (any leftover is forgiven)
+        self.assertAlmostEqual(lad.forgiven, 3.5)
+        lad.record("up", False, -10, 2, base_profit=2.5)
+        lad.record("up", True, 4.0, 2, base_profit=2.5)                    # the 1st of 2 still carries its leftover
+        self.assertAlmostEqual(lad.streak_lost, 8.5)
         self.assertEqual((lad.wins_left, lad.forgiven), (1, 0))
 
     def test_one_win_is_the_old_behaviour(self):
