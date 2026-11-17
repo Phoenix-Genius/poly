@@ -4,6 +4,20 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.12] - 2026-11-18
+
+### Step column cycles count wins, like the Hyperliquid bot's
+- **What:** History's Step column (bot History, all-bots History, simulation) ends a Recover over N cycle at the
+  N-th win in a row since the last loss, by counting wins instead of replaying the money.
+- **Why:** Manta's #228–#230 (loss, win, win) showed the cycle ending at #229: the replay had already forgiven
+  #227's $4.11 (v1.4.11's rule), while the bot, still on the old rule then, sized #229 to win that back too, so its
+  win paid the whole $6.10 and the replay closed the cycle a win early. Counting wins matches the owner's rule and
+  the bot's since v1.4.11, and reads older trades right.
+- **How:** `cycleMarks()` now counts wins (the same rule as the Hyperliquid page's); Reset / ladder end still close a
+  cycle.
+- **Tests:** checked on Manta (#213–#227 = *15, #228–#230 = *3) and Alpaca (#853–#860 = *8, #865–#878 = *14); the
+  page's script parses.
+
 ## [1.4.11] - 2026-11-18
 
 ### The N-th win in a row always ends the cycle

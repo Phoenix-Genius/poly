@@ -1348,38 +1348,32 @@ function moveDiffTd(t, d) {
   return `<td class="num ${good ? "pos" : "neg"}">${d >= 0 ? "+" : "−"}$${Math.abs(d).toFixed(2)}</td>`;
 }
 // History: when the bet was bought (JST) and how long was left in its round then
-// History's Step column follows the recovery cycle, worked out like the bot's own ladder (strategy.py Ladder):
-// a loss adds its cost to what is owed; with Recover sizing a win pays back what it earned above the Profit per win,
-// and the cycle ends when nothing is owed, or at the N-th win in a row whatever is left (a dearer fill or fee; the
-// bot forgives it since v1.4.11) — a loss in between spreads the debt over N wins again; with Multiply sizing it ends at the N-th win since the last loss.
-// See stepTd for what the Step cell shows. rows: oldest first; closes(t): a Reset / ladder end drops what is owed.
+// History's Step column follows the recovery cycle, the same rule as the Hyperliquid bot's page: a loss starts (or
+// grows) a cycle; with Recover over N wins the N-th win in a row since the last loss ends it (the bot forgives any
+// leftover there since v1.4.11; a loss in between spreads the debt over N wins again). Counting wins, not replaying
+// the money, so trades made under older rules still read right. rows: oldest first; closes(t): a Reset / ladder
+// end closes a cycle. Recover over 1: no bars or "*N", just a win at step 2+ in bold (see stepTd).
 function cycleMarks(rows, won, closes = () => false, settings = {}) {
-  const base = settings.sizing === "multiply" ? null : +settings.base_profit_usd || 0;
-  const n = Math.max(1, +settings.recover_wins || 1), marks = new Map();
-  let owed = 0, left = 0, bets = 0, wins = 0, cyc = 0;  // bets and wins in the open cycle; cycles so far
+  const n = Math.max(1, +(settings || {}).recover_wins || 1), marks = new Map();
+  let open = false, left = 0, bets = 0, wins = 0, cyc = 0;
   for (const t of rows) {
-    if (closes(t)) { owed = 0; left = 0; bets = wins = 0; continue; }
+    if (closes(t)) { open = false; continue; }
     if (t.event) continue;
-    const p = +t.pnl || 0;
-    if (!won(t)) { if (!bets) cyc++; owed += -p; left = 0; bets++; marks.set(t, {won: false, end: false, cyc}); continue; }
-    if (owed <= 0) continue;                       // a win with nothing owed: no cycle
-    bets++; wins++;
-    let end;
-    if (base == null) {                            // Multiply: the N-th win since the last loss clears it
-      const l = left || n;
-      end = l <= 1;
-      owed = end ? 0 : owed - owed / l;
-      left = end ? 0 : l - 1;
-    } else {
-      owed -= Math.max(0, p - base);
-      end = owed <= 0.005 || (left || n) <= 1;            // the N-th straight win ends it (any leftover is forgiven)
-      if (end) { owed = 0; left = 0; } else left = Math.max(1, (left || n) - 1);
+    if (!won(t)) {
+      if (!open) { open = true; cyc++; bets = wins = 0; }
+      left = 0; bets++;
+      marks.set(t, {won: false, end: false, cyc});
+      continue;
     }
+    if (!open) continue;                           // a win with nothing owed: no cycle
+    bets++; wins++;
+    const l = left || n, end = l <= 1;
+    left = end ? 0 : l - 1;
     marks.set(t, {won: true, end, bets, wins, cyc});
-    if (end) bets = wins = 0;
+    if (end) open = false;
   }
-  if (bets) for (const m of marks.values()) if (m.cyc === cyc) m.open = true;   // the newest cycle, still owed
-  if (n === 1) for (const m of marks.values()) m.plain = true;   // Recover over 1: no bars or "*N", just the last step
+  if (open) for (const m of marks.values()) if (m.cyc === cyc) m.open = true;   // the newest cycle, still owed
+  if (n === 1) for (const m of marks.values()) m.plain = true;
   return marks;
 }
 // the Step cell (Recover over 2+ wins; over 1: only a win at step 2+, bold): a win inside a cycle shows its step; the win that ends a cycle of several wins shows "*14" (the
