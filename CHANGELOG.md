@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-11-17
+
+### Bet mode tile shows how bets are sized
+- **What:** the 🧭 Bet mode tile gets a small last line with the sizing, e.g. "recover over 2 wins · $2/win" or
+  "multiply ×2.2 from $3".
+- **Why:** the tile showed only the entry mode; the sizing needed opening the settings to see.
+- **How:** `sizingLine()` in `static/index.html` from `sizing`, `recover_wins`, `base_profit_usd`, `multiplier`, `start_usd`.
+- **Tests:** UI only; checked by hand.
+
 ## [1.4.5] - 2026-11-17
 
 ### A stopped bot's open bet shows its win chance too

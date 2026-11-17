@@ -943,6 +943,12 @@ function condShort(v) {
   return [...ands, ...(ors ? [ors] : [])].join(" · ") || "no condition";
 }
 // the Bet mode tile: which mode and its main setting, e.g. "Conditions ≤90s left AND 0.75–0.95", "Side · random"
+// the Bet mode tile's last line: how bets are sized, e.g. "recover over 2 wins · $2/win", "multiply ×2.2 from $3"
+function sizingLine(v) {
+  const n = +v.recover_wins || 1;
+  return v.sizing === "multiply" ? `multiply ×${+v.multiplier} from ${money(v.start_usd)}`
+    : `recover over <b>${n}</b> win${n === 1 ? "" : "s"} · ${money(v.base_profit_usd)}/win`;
+}
 function modeTile(v) {
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
   if (v.entry_mode === "conditions") return `Conditions ${small(`<span class="condrow" title="${esc(condText(v))}">${esc(condShort(v))}</span>`)}`;
@@ -982,7 +988,7 @@ function render() {
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
       <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}</div>
-      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div></div>
+      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div></div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
