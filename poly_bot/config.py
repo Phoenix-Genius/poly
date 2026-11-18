@@ -134,7 +134,7 @@ FIELDS: dict[str, tuple] = {
                          "Bet only during this many seconds after a round starts, e.g. 60. Later in the round "
                          "the price already shows where it is heading. 0 = auto: the first third of the round "
                          "(5m: 100 s, 15m: 5 min, 1h: 20 min)."),
-    "poll_interval_sec": (2.0, "number", None, "Check interval (s)",
+    "poll_interval_sec": (1.0, "number", None, "Check interval (s)",
                           "How often the bot checks the round. 1-5 is fine."),
     "result_wait": ("fast", "select", ["fast", "official"], "Result",
                     "When a round's bet counts as won or lost, so the bot can bet again. fast = about 10-30 s after "

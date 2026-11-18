@@ -4,6 +4,17 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.15] - 2026-11-18
+
+### Check interval 1 s by default
+- **What:** a new bot checks the round every 1 s instead of 2 s; the owner's 27 bots and 4 presets were moved to 1 s.
+- **Why:** bots on the same preset split at 13:30 on Nov 18: the Conditions ($1 move, 0.45-0.55) were true for about
+  a second at the round's start, Pelican and Manta (checking at :03) bet Up and lost, Alpaca (:02) and Hornet (:04)
+  missed it, bet Down at 13:31 and won. Checking every second catches any such moment that lasts a second or more.
+- **How:** `poll_interval_sec` default 2.0 -> 1.0 in `config.py`; the hosted bots' config.json and .presets.json
+  edited (not in git).
+- **Tests:** full suite passes.
+
 ## [1.4.14] - 2026-11-18
 
 ### Compact top of the bot list, the round's time left
