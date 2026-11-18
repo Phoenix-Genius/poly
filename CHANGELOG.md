@@ -4,6 +4,20 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.17] - 2026-11-18
+
+### Bet sizing "percent": a share of the budget, up to all-in
+- **What:** a third Bet sizing, percent: each bet costs Bet (% of budget) of the budget left, fees included (1-100;
+  100 = all-in). A win makes the next bet bigger, a loss smaller (50% of $200: $100, $50, $25 ...); a win clears the
+  streak, nothing is carried. Profit per win, Recover over, Multiplier and Steps to survive are hidden then.
+- **Why:** the owner wanted, besides sizing by profit, to bet a share of the bot's budget, up to all of it.
+- **How:** `bet_pct` setting; `strategy.percent_sizing()` / `percent_cost()` (a `Sizing` with the bet at its step,
+  each later step x (1 - %)); `streak_sizing()` returns it, so the bot, the Step ladder and the simulation share it;
+  `shares_for_book()` buys the most shares the bet's money pays for walking the asks (5 at least, then the budget
+  check decides). Settings form, summary chips, Bet mode tile and preset summary show it.
+- **Tests:** new `PercentSizingTest` (shares of what's left, all-in ends after one loss, never over the bet on the
+  book, win clears, bad % refused, simulation); full suite passes; the page's script parses.
+
 ## [1.4.16] - 2026-11-18
 
 ### Left colored by the result; the card's Up / Down arrow in two colors

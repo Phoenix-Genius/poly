@@ -43,10 +43,15 @@ FIELDS: dict[str, tuple] = {
                         "Reset starts counting again). "
                         "Empty (or 0) = off: the bot runs until you stop it."),
     # --- sizing -----------------------------------------------------------------------------------------
-    "sizing": ("recover", "select", ["recover", "multiply"], "Bet sizing",
+    "sizing": ("recover", "select", ["recover", "multiply", "percent"], "Bet sizing",
                "recover = each bet is sized so one win pays back every loss of the streak plus the Profit per "
                "win, at the price actually paid. multiply = the first bet costs Starting bet, and every loss "
-               "multiplies the next bet by the Multiplier."),
+               "multiplies the next bet by the Multiplier. percent = each bet costs a share of the budget left "
+               "(Bet % of budget); 100% = all-in."),
+    "bet_pct": (100.0, "number", None, "Bet (% of budget)",
+                "percent sizing: each bet costs this share of the budget left, fees included. 100 = all-in: "
+                "the whole budget on every bet. A win makes the next bet bigger, a loss smaller; at 100% one "
+                "loss ends the ladder. Polymarket's minimum is 5 shares."),
     "base_profit_usd": (2.5, "number", None, "Profit per win ($)",
                         "recover sizing: what each win earns after fees and after paying back the streak's "
                         "losses, e.g. 2.5. At a price of 0.50 the first bet then costs about $2.69, and each "
@@ -238,7 +243,7 @@ class BotConfig:
         """Steps to survive in effect: side mode only. In hit, time and move mode a bet costs 0.75-0.99 a share, so
         each step costs ~4-20x the last and fitting several into the budget leaves no real first bet (the saved
         value is kept and counts again in side mode)."""
-        return self.target_steps if self.entry_mode == "side" else 0
+        return self.target_steps if self.entry_mode == "side" and self.sizing != "percent" else 0
 
     @property
     def budget(self) -> float:
@@ -285,6 +290,8 @@ class BotConfig:
                 raise ValueError("Price from and Price to must be between 0.01 and 0.99, or empty for no limit")
             if self.cond_price_max and self.cond_price_min > self.cond_price_max:
                 raise ValueError("Price from is above Price to")
+        if not (1 <= self.bet_pct <= 100):
+            raise ValueError("Bet (% of budget) must be between 1 and 100")
         if not (1 <= self.recover_wins <= 5):
             raise ValueError("Recover over (wins) must be between 1 and 5")
         if not (0 <= self.target_steps <= 30):

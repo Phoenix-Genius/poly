@@ -294,6 +294,8 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
     terms: dict = {}                       # (base, step, owed, wins_left, price) -> (shares, cost)
 
     def sizing_for(step: int, base: float, left: float, carried: bool):
+        if cfg.sizing == "percent":            # Bet % of what's left now (base = that bet, so it's cached apart)
+            return streak_sizing(cfg, 1, 0.0, left)
         if not cfg.survive_steps:
             return cfg, 0.0
         if (step == 1 and not carried) or not base:
@@ -335,7 +337,7 @@ def simulate(cfg, price: float, bankroll: float, bets: int = 1000, runs: int = 1
             logging = run == 0 and len(log) < LOG_ROWS
             fits = sizing is not None
             if fits:
-                shares, cost = bet_terms(sizing, base, step, owed, wins_left, p)
+                shares, cost = bet_terms(sizing, base, 1 if cfg.sizing == "percent" else step, owed, wins_left, p)
                 fits = cost <= left + 1e-9 and not (cfg.max_steps and step > cfg.max_steps)
             if not fits:
                 if step == 1 and owed <= 0:    # even the first bet doesn't fit any more: out of money

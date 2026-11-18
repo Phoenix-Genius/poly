@@ -291,3 +291,48 @@ class SimulateTest(unittest.TestCase):
             simulate(cfg, 0.5, 0)
 
 
+class PercentSizingTest(unittest.TestCase):
+    """Bet sizing "percent": each bet costs Bet % of the budget left; 100% = all-in (owner's request 2026-11-18)."""
+
+    def test_each_bet_is_the_share_of_what_is_left(self):
+        from poly_bot.strategy import streak_sizing
+        cfg = BotConfig(sizing="percent", bet_pct=50)
+        s, base = streak_sizing(cfg, 1, 0.0, 200)
+        self.assertEqual(base, 100.0)
+        costs = [r.cost for r in build_ladder(s, 0.5, 200)[:3]]
+        self.assertEqual(costs, [100.0, 50.0, 25.0])              # each loss leaves half, so the next bet halves
+        self.assertLessEqual(cost_of(shares_for(s, 1, 0.0, 0.5), 0.5), 100.0)
+
+    def test_all_in_bets_everything_and_one_loss_ends_the_ladder(self):
+        from poly_bot.strategy import streak_sizing
+        cfg = BotConfig(sizing="percent", bet_pct=100)
+        self.assertEqual(cfg.survive_steps, 0)                     # Steps to survive doesn't apply
+        s, _ = streak_sizing(cfg, 1, 0.0, 200)
+        rows = build_ladder(s, 0.5, 200)
+        self.assertEqual([r.fits for r in rows], [True, False])
+        self.assertGreater(rows[0].cost, 199)
+
+    def test_on_the_book_never_spends_more_than_the_bet(self):
+        from poly_bot.strategy import shares_for_book, streak_sizing, walk_asks
+        s, _ = streak_sizing(BotConfig(sizing="percent", bet_pct=100), 1, 0.0, 100)
+        asks = [(0.50, 40), (0.52, 60), (0.55, 500)]
+        n = shares_for_book(s, 1, 0.0, asks, 0.55)
+        self.assertLessEqual(walk_asks(asks, n, 0.55).cost, 100 + 1e-9)
+        self.assertGreater(walk_asks(asks, n + 0.05, 0.55).cost, 100)  # and as many as the money buys
+
+    def test_win_clears_the_streak(self):
+        lad = Ladder()
+        lad.record("up", False, -50.0)
+        lad.record("up", True, 30.0)
+        self.assertEqual((lad.step, lad.streak_lost), (1, 0.0))
+
+    def test_bad_percent_is_refused(self):
+        for bad in (0, 101):
+            with self.assertRaises(ValueError):
+                BotConfig(sizing="percent", bet_pct=bad).validate()
+
+    def test_simulation_runs(self):
+        from poly_bot.simulate import simulate
+        out = simulate(BotConfig(sizing="percent", bet_pct=100), 0.5, 100, bets=50, runs=20, seed=1)
+        self.assertIn("first_bet", out)
+        self.assertGreater(out["first_bet"]["cost"], 99)

@@ -253,7 +253,9 @@ def shares_for(cfg, step: int, streak_lost: float, p: float, rate: float = DEFAU
                exponent: float = 1.0, wins_left: int = 0) -> float:
     """How many shares to buy at price p for this step of the ladder (at least MIN_SHARES)."""
     per_share = p + fee_per_share(p, rate, exponent)
-    if cfg.sizing == "recover":
+    if cfg.sizing == "percent":
+        shares = floor2(percent_cost(cfg, step) / per_share)
+    elif cfg.sizing == "recover":
         # a win must leave base_profit after paying back (its part of) the streak: shares - shares * per_share = target
         shares = ceil2((cfg.base_profit_usd + recover_part(cfg, streak_lost, wins_left)) / (1 - per_share))
     else:
@@ -301,13 +303,32 @@ def steps_that_fit(ladder: Sequence[Rung]) -> int:
 
 @dataclass
 class Sizing:
-    """The sizing settings with the first bet replaced (what Steps to survive works out)."""
+    """The sizing settings with the first bet replaced (what Steps to survive works out), or percent sizing's bet
+    worked out from the budget left (bet_usd at step from_step)."""
     sizing: str
     base_profit_usd: float
     start_usd: float
     multiplier: float
     max_steps: int
     recover_wins: int = 1
+    bet_pct: float = 100.0
+    bet_usd: float = 0.0
+    from_step: int = 1
+
+
+def percent_cost(cfg, step: int) -> float:
+    """percent sizing: what the bet at `step` costs. bet_usd is the bet at from_step (bet % of the budget left
+    then); each loss after it leaves (1 - %) of the budget, so the next bet is that much smaller. At 100% nothing
+    is left after a loss: the bet stays the same (and no longer fits the budget)."""
+    f = min(1.0, max(0.0, cfg.bet_pct / 100))
+    k = max(0, step - cfg.from_step)
+    return cfg.bet_usd * ((1 - f) ** k if f < 1 else 1.0)
+
+
+def percent_sizing(cfg, step: int, budget: float) -> Sizing:
+    """percent sizing for the bet at `step` with `budget` left: Bet % of it."""
+    return Sizing("percent", cfg.base_profit_usd, cfg.start_usd, 1.0, cfg.max_steps, 1, cfg.bet_pct,
+                  floor2(max(0.0, budget) * cfg.bet_pct / 100), step)
 
 
 def with_base(cfg, base: float) -> Sizing:
@@ -416,6 +437,20 @@ def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], m
     asks = sorted(a for a in asks if a[0] <= max_price + 1e-9)
     if not asks:
         return None
+    if cfg.sizing == "percent":                     # the most shares the bet's money buys walking the asks
+        spend = percent_cost(cfg, step)
+        fits = lambda n: (f := walk_asks(asks, n, max_price, rate, exponent)) is not None and f.cost <= spend + 1e-9  # noqa: E731
+        lo, hi = 0.0, shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)
+        if fits(hi):
+            return hi
+        for _ in range(60):
+            if hi - lo <= 0.01 + 1e-9:
+                break
+            mid = floor2((lo + hi) / 2)
+            if mid <= lo:
+                break
+            lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+        return max(lo, MIN_SHARES)                  # 5 shares at least: the budget check decides if it fits
     if cfg.sizing != "recover":
         return shares_for(cfg, step, streak_lost, asks[0][0], rate, exponent)
     target = cfg.base_profit_usd + recover_part(cfg, streak_lost, wins_left)
@@ -443,7 +478,10 @@ def shares_for_book(cfg, step: int, streak_lost: float, asks: Sequence[tuple], m
 def streak_sizing(cfg, step: int, base: float, budget: float, carried: bool = False):
     """(sizing, base) for a bet at `step` of a streak. Without Steps to survive: (cfg, 0). With it, a new streak
     (step 1, or no base yet) works out its first bet from `budget` at the Max price; later steps keep `base`.
-    sizing is None when the budget can't pay for the steps."""
+    sizing is None when the budget can't pay for the steps. percent sizing: Bet % of `budget` (base = that bet)."""
+    if cfg.sizing == "percent":
+        s = percent_sizing(cfg, step, budget)
+        return s, s.bet_usd
     if not cfg.survive_steps:
         return cfg, 0.0
     if (step == 1 and not carried) or not base:     # carried: a debt still being won back keeps its streak's base

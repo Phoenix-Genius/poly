@@ -661,7 +661,7 @@ async function loadPresets() { try { presets = (await api("/api/presets")).prese
 const PRESET_SKIP = ["bot_name", "network", "budget_usd", "paper_balance_usd", "stop_profit_usd"];   // stop_profit_usd = Until earn
 function presetSummary(p) {
   const m = p.entry_mode === "conditions" ? condText(p) : `side ${p.side_mode}`;
-  return `${p.coin} ${p.timeframe} · ${m} · ${p.sizing === "recover" ? `$${p.base_profit_usd}/win` : `×${p.multiplier}`}` +
+  return `${p.coin} ${p.timeframe} · ${m} · ${p.sizing === "percent" ? `${p.bet_pct}% of budget` : p.sizing === "recover" ? `$${p.base_profit_usd}/win` : `×${p.multiplier}`}` +
     (+p.max_steps ? ` · ${p.max_steps} losses` : "");
 }
 // the presets whose settings the bot has now (for the Bet mode tile); coin, timeframe and what presets don't keep
@@ -753,14 +753,14 @@ $("#newDlg").addEventListener("close", async () => {
 });
 
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
-const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply"};
+const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply", bet_pct: "percent"};
 const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "cond_price_min", "cond_price_max"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
   {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "side_mode", "first_side",
     "cond_time", "cond_time_sec", "cond_move", "cond_move_usd", "cond_price", "cond_price_min", "cond_price_max", "cond_join"]},   // conditions: one row per condition
-  {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
+  {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "bet_pct", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec", "result_wait"]},
 ];
@@ -860,8 +860,8 @@ const budgetOf = s => s.network === "live" ? +s.settings.budget_usd || 0 : 0;
 function showFields() {
   const v = formValues();
   showRecs(v);
-  const auto = v.entry_mode === "side" && +v.target_steps > 0;   // Steps to survive (side mode only) works out the first bet: its box isn't used then
-  $('.field[data-key="target_steps"]')?.classList.toggle("hide", v.entry_mode !== "side");
+  const auto = v.entry_mode === "side" && v.sizing !== "percent" && +v.target_steps > 0;   // Steps to survive (side mode only) works out the first bet: its box isn't used then
+  $('.field[data-key="target_steps"]')?.classList.toggle("hide", v.entry_mode !== "side" || v.sizing === "percent");
   for (const [k, sizing] of Object.entries(SIZING_ONLY)) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", v.sizing !== sizing || (auto && k !== "multiplier" && k !== "recover_wins"));
   // each Bet mode shows only its own fields: side = Side mode + Min/Max price + Entry window, conditions = the
   // Time left / Move / Price rows
@@ -897,8 +897,9 @@ function renderSettingsHead(v) {
   const chip = (icon, k, val, edit, extra = "", cls = "") => `<span class="chip ${cls}" data-edit="${edit}" title="Change"><span aria-hidden="true">${icon}</span><span class="k">${k}</span><b>${val}</b>${extra ? `<span class="k">${extra}</span>` : ""}</span>`;
   $("#setIdChips").innerHTML = `<span class="chip ${v.network === "live" ? "live" : "paper"}" data-edit="network" title="Change">${v.network === "live" ? "💵 LIVE" : "📝 paper"}</span>` +
     `<span class="chip market" data-edit="coin" title="Change"><b>${esc(v.coin)} · ${esc(v.timeframe)}</b></span>`;
-  const auto = v.entry_mode === "side" && n(v.target_steps) > 0;
-  const bet = v.sizing === "recover"
+  const auto = v.entry_mode === "side" && v.sizing !== "percent" && n(v.target_steps) > 0;
+  const bet = v.sizing === "percent" ? chip("🎯", "Bet", `${n(v.bet_pct)}% of budget`, "bet_pct")
+    : v.sizing === "recover"
     ? chip("🎯", "Profit/win", auto ? "auto" : money(n(v.base_profit_usd)), auto ? "target_steps" : "base_profit_usd")
     : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
@@ -910,8 +911,8 @@ function renderSettingsHead(v) {
       : chip("🧾", "Paper balance", money(n(v.paper_balance_usd)), "paper_balance_usd"),
     chip("🏁", "Until earn", n(v.stop_profit_usd) > 0 ? money(n(v.stop_profit_usd)) : "off", "stop_profit_usd"),
     bet,
-    chip("📐", "Sizing", v.sizing === "recover" ? (n(v.recover_wins) > 1 ? `recover · ${n(v.recover_wins)} wins` : "recover") : `×${esc(v.multiplier)}`, "sizing"),
-    v.entry_mode === "side" ? chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps") : "",
+    chip("📐", "Sizing", v.sizing === "percent" ? (n(v.bet_pct) >= 100 ? "all-in" : "percent") : v.sizing === "recover" ? (n(v.recover_wins) > 1 ? `recover · ${n(v.recover_wins)} wins` : "recover") : `×${esc(v.multiplier)}`, "sizing"),
+    v.entry_mode === "side" && v.sizing !== "percent" ? chip("🛡️", "Survive", auto ? `${n(v.target_steps)} steps` : "off", "target_steps") : "",
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
     conds ? chip("🧩", "Conditions", esc(condText(v)) + (v.cond_price === "off" ? " · no limit" : ""), "cond_time")
       : chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
@@ -1002,6 +1003,7 @@ function condShort(v) {
 // the Bet mode tile's last line: how bets are sized, e.g. "recover over 2 wins · $2/win", "multiply ×2.2 from $3"
 function sizingLine(v) {
   const n = +v.recover_wins || 1;
+  if (v.sizing === "percent") return +v.bet_pct >= 100 ? "all-in: the whole budget each bet" : `<b>${+v.bet_pct}%</b> of the budget each bet`;
   return v.sizing === "multiply" ? `multiply ×${+v.multiplier} from ${money(v.start_usd)}`
     : `recover over <b>${n}</b> win${n === 1 ? "" : "s"} · ${money(v.base_profit_usd)}/win`;
 }
