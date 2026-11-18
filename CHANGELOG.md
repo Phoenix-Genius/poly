@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.16] - 2026-11-18
+
+### Left colored by the result; the card's Up / Down arrow in two colors
+- **What:** History's and the simulation's Left column is green for a won bet and red for a lost one, like #. On a
+  bot card the open bet's arrow is a green ▲ for Up and a red ▼ for Down (both were red).
+- **Why:** the owner wanted the result visible in Left too, and Up and Down told apart at a glance.
+- **How:** `leftTd(t, won)` and the simulation's Left cell take the result's class; `.bi-side.up` is green.
+- **Tests:** full suite passes; the page's script parses.
+
 ## [1.4.15] - 2026-11-18
 
 ### Check interval 1 s by default

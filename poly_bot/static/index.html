@@ -119,6 +119,7 @@
   .bi-steps .steps i { height: 4px; max-width: 16px; }
   .bi-steps b { color: var(--text); font-weight: 650; }
   .bi-side { color: var(--red); font-size: 12px; }
+  .bi-side.up { color: var(--green); }   /* Up / long green, Down / short red */
   /* the card's move and win chance, picked out like the Current bet's "BTC now ▲ $4.84" */
   .bi-steps b.hl.pos { color: var(--green); } .bi-steps b.hl.neg { color: var(--red); }
   /* an open bet: the whole card is green while it's winning (win chance 50%+), red while it's losing */
@@ -616,7 +617,7 @@ function renderBots() {
     // an open bet: its side as a red arrow, its cost and the win chance (the coin's move is on top of the list)
     const chance = b.bet_side && b.bet_chance != null
       ? ` · <b class="hl ${b.bet_chance >= 0.5 ? "pos" : "neg"}" title="Win chance now: the market's price of ${b.bet_side.toUpperCase()}">${Math.round(b.bet_chance * 100)}%</b>` : "";
-    const next = b.bet_side ? `<span class="bi-bet"><span class="bi-side" title="Bet ${b.bet_side.toUpperCase()}">${b.bet_side === "up" ? "▲" : "▼"}</span> <b>${money(b.bet_cost)}</b>${chance}</span>` : `🎯 next <b>${money(b.next_cost)}</b>`;
+    const next = b.bet_side ? `<span class="bi-bet"><span class="bi-side ${b.bet_side === "up" ? "up" : ""}" title="Bet ${b.bet_side.toUpperCase()}">${b.bet_side === "up" ? "▲" : "▼"}</span> <b>${money(b.bet_cost)}</b>${chance}</span>` : `🎯 next <b>${money(b.next_cost)}</b>`;
     return `<div class="bot-item st-${st} ${b.id === current ? "active" : ""} ${b.bet_side && b.bet_chance != null ? (b.bet_chance >= 0.5 ? "bet-win" : "bet-lose") : ""}" data-id="${esc(b.id)}" draggable="true" tabindex="0"
          title="Drag to reorder · Alt+↑/↓ moves the selected bot">
       <div class="bi-top"><span class="dot ${st === "stop" ? "" : st}" title="${esc(b.message || "")}"></span><span class="bi-name" data-no-i18n title="${esc(b.name)} · ${esc(b.coin)} ${esc(b.timeframe)} rounds${b.message ? " · " + esc(b.message) : ""}">${esc(b.name)}</span>
@@ -1240,7 +1241,7 @@ function simLogHtml(r) {
     return `<tr data-hk="${esc(hk)}" class="${histMarked.has(hk) ? "rd-mark" : ""}"><td class="num ${t.win ? "pos" : "neg"}"><b>${t.n}</b></td>
       <td class="l num">${placed ? jst(placed).slice(6) : dash}</td><td class="l num">${t.paid_at ? jst(t.paid_at) : dash}</td>
       <td class="l" data-no-i18n>${t.slug ? `<a href="https://polymarket.com/event/${esc(t.slug)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(shortRound(title, t.slug))}</a>` : dash}${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
-      <td class="num" title="Not in the replay's data">${dash}</td><td class="num">${t.round ? `${t.end - t.round - t.at}s` : dash}</td>
+      <td class="num" title="Not in the replay's data">${dash}</td><td class="num ${t.win ? "pos" : "neg"}">${t.round ? `${t.end - t.round - t.at}s` : dash}</td>
       <td class="l">${t.side ? sideHtml(t.side) : dash}</td>${moveDiffTd(t, t.move_bet)}${moveDiffTd(t, t.move_end)}
       <td class="num">${t.best != null ? (+t.best).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip > 0.005 ? money(-slip) : "$0.00"}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs}</td>
@@ -1426,7 +1427,8 @@ function stepTd(t, m) {
 function betAtTd(t) {
   return t.placed ? `<td class="l num" title="Bought at ${esc(t.placed)} JST">${esc(t.placed.slice(11, 19))}</td>` : '<td class="l num"><span class="muted">–</span></td>';
 }
-const leftTd = t => `<td class="num">${t.bet_left === "" || t.bet_left == null ? '<span class="muted">–</span>' : `${+t.bet_left}s`}</td>`;
+// Left is colored by the bet's result, like #
+const leftTd = (t, won) => `<td class="num ${won ? "pos" : "neg"}">${t.bet_left === "" || t.bet_left == null ? '<span class="muted">–</span>' : `${+t.bet_left}s`}</td>`;
 // fast = the bot's own TWAP and the market agreed (Result = fast); corrected = Polymarket's official result overturned it
 const resultBy = t => t.result_by === "fast" ? ' <span class="muted" title="Fast result: the bot\'s own 60 s TWAP and the market agreed ~30 s after the end; Polymarket\'s official result confirms it later">⚡</span>'
   : t.result_by === "corrected" ? ' <span class="neg" title="The fast result was wrong; corrected to Polymarket\'s official result">⚠ corrected</span>' : "";
@@ -1466,7 +1468,7 @@ function historyTable(trades, events = [], total = trades.length) {
   const marks = cycleMarks([...rows].reverse(), t => t.side === t.result, t => t.event && ["reset", "paper_reset", "ladder_end"].includes(t.kind), status?.settings);
   return `${historyHead()}
     ${rows.map(t => t.event ? `<tr class="ev ev-${esc(t.kind)}"><td></td><td></td><td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" colspan="19">${t.kind === "settings" ? "⚙️" : t.kind === "ladder_end" ? "🪜" : t.kind === "result_fixed" ? "⚠️" : "↺"} ${esc(t.text)}</td></tr>` : `<tr data-hk="${esc(histKey(t))}" class="${histMarked.has(histKey(t)) ? "rd-mark" : ""}"><td class="num ${t.side === t.result ? "pos" : "neg"}"><b>${n--}</b></td>${betAtTd(t)}<td class="l num">${esc(t.time.slice(5, 19))}</td><td class="l" data-no-i18n><a href="https://polymarket.com/event/${esc(t.round)}" target="_blank" rel="noopener" title="${esc(t.title)}">${esc(shortRound(t.title, t.round))}</a>${t.missed ? ` <span class="muted" title="${esc(t.missed)} round(s) missed since the previous bet">(${esc(t.missed)})</span>` : ""}</td>
-      <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}
+      <td class="num">${t.volume === "" || t.volume == null ? dash : money(t.volume)}</td>${leftTd(t, t.side === t.result)}<td class="l">${sideHtml(t.side)}</td>${moveTd(t, t.coin_at_bet, +t.twap_beat || t.beat)}${moveTd(t, t.twap_end, t.twap_beat)}
       <td class="num">${t.best_price ? (+t.best_price).toFixed(3) : dash}</td><td class="num">${(+t.price).toFixed(3)}</td><td class="num">${sharesTxt(t.shares)}</td><td class="num">${money(t.cost)}</td>
       <td class="num neg">${slip(t)}</td><td class="num neg">${+t.fee ? money(-t.fee) : "$0.00"}</td><td class="num">${costs(t)}</td>
       <td class="l">${t.side === t.result ? '<span class="pos">✅ win</span>' : '<span class="neg">❌ loss</span>'}</td>
