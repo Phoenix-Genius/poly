@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.18] - 2026-11-18
+
+### Up / Down as a blue ▲ / orange ▼
+- **What:** the bot card's arrow and the History's, the all-bots History's and the simulation's Bet column show the side as a blue ▲ (Up) or an orange ▼ (Down),
+  with no word.
+- **Why:** the owner wanted green and red kept for win and loss only, and a shorter column.
+- **How:** `.bi-side` colors; `sideArrow()` in the three tables (Current bet and Rounds keep "📈 Up / 📉 Down").
+- **Tests:** full suite passes; the page's script parses.
+
 ## [1.4.17] - 2026-11-18
 
 ### Bet sizing "percent": a share of the budget, up to all-in
