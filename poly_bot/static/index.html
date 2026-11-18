@@ -276,7 +276,7 @@
   #simPanel { --sec: #0d9488; } .dark #simPanel { --sec: #2dd4bf; }
   .simform { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
   .simform label { display: block; font-size: 12px; color: var(--muted); }
-  .simform input { width: 110px; padding: 4px 6px; border: 1px solid var(--line); background: var(--input); }
+  .simform input, .simform select { width: 110px; padding: 4px 6px; border: 1px solid var(--line); background: var(--input); }
   .simstats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin: 8px 0; }
   .simstats > div { background: var(--panel); padding: 8px 10px; }
   .simstats .label { font-size: 12px; color: var(--muted); } .simstats .value { font-size: 18px; font-weight: 700; }
@@ -1145,7 +1145,7 @@ function betPanel(s) {
 }
 // --- simulation (like the hyperliquid bot's): these settings over many bets in a fair market ---
 // The page is re-rendered every few seconds, so the inputs and the last result live here, not in the DOM.
-const simIn = {bets: "1000", runs: "1000", bankroll: ""};
+const simIn = {bets: "1000", runs: "1000", bankroll: "", recover_wins: ""};   // recover_wins "" = the form's
 let simLoading = null;          // {done, total} while past rounds download
 let simResult = null, simFor = "", simBusy = false, simLogOpen = true;
 const sgnMoney = v => money(v, true);
@@ -1153,6 +1153,12 @@ const pctTxt = x => (x * 100 < 1 && x > 0 ? "<1" : x * 100 > 99 && x < 1 ? ">99"
 function simPanelBody() {
   if (simFor !== current) { simResult = null; simFor = current; }
   const inp = (k, label, ph) => `<div><label>${label}</label><input data-sim="${k}" value="${esc(simIn[k])}" placeholder="${ph}" inputmode="decimal"></div>`;
+  // Recover over (wins) for this simulation only, to compare 1, 2, 3… without changing the form; recover sizing only
+  const fv = $("#form") ? formValues() : (status?.settings || {}), recover = fv.sizing === "recover";
+  const rwSel = `<div title="${recover ? "Recover over (wins) for this simulation only; the bot's setting stays as it is" : "Only with Sizing = recover"}">
+      <label>Recover over (wins)</label><select data-sim="recover_wins" ${recover ? "" : "disabled"}>
+      <option value="">as in form (${+fv.recover_wins || 1})</option>
+      ${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${simIn.recover_wins === String(n) ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
   return `<div class="simhelp">Plays the ladder bet after bet, many times over, with the settings in the form (saved or not).
       <b>Past rounds</b> replays Polymarket's real rounds of this coin and timeframe (the last ~7 days, price minute by minute) through
       this Bet mode's own entry rule: every bet at the price the bot would really have paid then, winning only if that round really went
@@ -1161,7 +1167,7 @@ function simPanelBody() {
       Bet mode (same rounds: real price paid minus the replay's). Fees, the 5-share minimum and the budget are included. A ladder end starts
       again at step 1 with the money left.</div>
     <form class="simform" id="simForm">
-      ${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}
+      ${inp("bets", "Bets per run", "1000")}${inp("runs", "Runs", "1000")}${inp("bankroll", "Budget ($)", "budget left")}${rwSel}
       <button class="btn go" type="submit" ${simBusy ? "disabled" : ""}>${simBusy ? (simLoading ? "Loading past rounds…" : "Simulating…") : "Run simulation"}</button>
       ${simLoading ? `<span class="simhelp">${simLoading.total ? `Downloading ${simLoading.what ? esc(simLoading.what) + " for the" : ""} past rounds: ${simLoading.done.toLocaleString()} of ${simLoading.total.toLocaleString()}` : "Listing past rounds…"} (once; later only new rounds)</span>` : ""}</form>
     <div id="simOut" style="opacity:${simBusy && simResult ? .45 : 1}">${simResult ? simHtml(simResult) : ""}</div>`;
@@ -1179,10 +1185,10 @@ async function runSim() {
   simBusy = true; render();
   const id = current;
   try {
-    const r = await api(`/api/bots/${id}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll,
-      settings: formValues()});
+    const settings = {...formValues(), ...(simIn.recover_wins ? {recover_wins: simIn.recover_wins} : {})};
+    const r = await api(`/api/bots/${id}/simulate`, {bets: simIn.bets, runs: simIn.runs, bankroll: simIn.bankroll, settings});
     if (r.loading && id === current) { simLoading = r.loading; render(); setTimeout(() => id === current ? runSim() : (simBusy = false, simLoading = null), 3000); return; }
-    simResult = r;
+    simResult = {...r, settings};   // run 1's Step bars follow the Recover over it ran with
   } catch (err) { toast(err.message); }
   simBusy = false; simLoading = null; render();
 }
@@ -1200,7 +1206,7 @@ function simHtml(r) {
          ? `measured on ${r.gap.bets} of your bots' real bets in this mode`
          : `the default for this mode (your bots have ${r.gap.bets} matching real bets; ${30} are needed to measure your own)`}` : "")
     : `Every bet at ${r.price.toFixed(2)}: wins ${(r.p_win * 100).toFixed(1)}% of the time, needs ${(r.break_even * 100).toFixed(1)}% to break even after fees`;
-  return `<div class="simhelp">${r.runs.toLocaleString()} runs of ${r.bets.toLocaleString()} bets from ${money(r.bankroll)}${days}.
+  return `<div class="simhelp">${r.runs.toLocaleString()} runs of ${r.bets.toLocaleString()} bets from ${money(r.bankroll)}${days}${r.settings?.sizing === "recover" ? ` · recover over <b>${+r.settings.recover_wins || 1}</b> win${(+r.settings.recover_wins || 1) === 1 ? "" : "s"}` : ""}.
       ${basis} (<b class="${tone(edge)}">${edge >= 0 ? "+" : ""}${(edge * 100).toFixed(1)} points</b>).
       ${r.mode === "real" ? "Past results don't promise future ones: a week is a small sample." : ""}
       ${f && r.mode !== "real" ? `First bet: ${money(f.cost)}, a win ${sgnMoney(f.win)}, a loss ${sgnMoney(f.loss)}.` : f ? "" : "The budget can't pay for Steps to survive."}</div>
@@ -1230,7 +1236,7 @@ function etTitle(start, end) {                 // "Bitcoin Up or Down - November
 function simLogHtml(r) {
   const L = r.log || [], shown = L.filter(t => !t.event).length;
   if (!L.length) return "";
-  const marks = cycleMarks(L, t => t.win, t => !!t.event, status?.settings);
+  const marks = cycleMarks(L, t => t.win, t => !!t.event, r.settings || status?.settings);
   const jst = ts => new Date((ts + 9 * 3600) * 1000).toISOString().slice(5, 19).replace("T", " ");   // like History's Paid out
   const dash = '<span class="muted">–</span>';
   let lastPaid = null;

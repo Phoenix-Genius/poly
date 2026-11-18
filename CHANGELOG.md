@@ -4,6 +4,18 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.20] - 2026-11-18
+
+### Recover over (wins) in the simulation panel
+- **What:** the simulation form has a Recover over (wins) box: "as in form (N)" (the default) or 1–5, for this
+  simulation only, so 1, 2, 3… can be compared without changing the bot's setting. Off unless Sizing = recover. The
+  result line says which value ran ("· recover over 2 wins"), and run 1's History Step bars use it.
+- **Why:** the owner: "add it in simulation panel plz".
+- **How:** `simIn.recover_wins` in `static/index.html`; `runSim()` puts it over `formValues()` in the request's
+  settings and keeps them on `simResult.settings`; `simLogHtml()` passes those to `cycleMarks()`. The server already
+  took `recover_wins` from the settings.
+- **Tests:** full suite (166) passes; the page's script parses.
+
 ## [1.4.19] - 2026-11-18
 
 ### Current bet side as an arrow
