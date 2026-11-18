@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.19] - 2026-11-18
+
+### Current bet side as an arrow
+- **What:** the Current bet title, its Side box and the Step ladder rows show the side as a blue ▲ (Up) or an
+  orange ▼ (Down), with no word.
+- **Why:** the owner wanted the same arrows as the History tables.
+- **How:** `sideArrow()` in the Current bet card and the Step ladder; only the Rounds table keeps `sideHtml()`.
+- **Tests:** full suite passes; the page's script parses.
+
 ## [1.4.18] - 2026-11-18
 
 ### Up / Down as a blue ▲ / orange ▼
