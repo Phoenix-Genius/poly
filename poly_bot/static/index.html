@@ -624,7 +624,7 @@ function renderBots() {
   $("#bots").innerHTML = bots.map(b => {
     const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
     const act = b.locked ? "" : b.running
-      ? `<button class="bi-act" data-stop="${esc(b.id)}" title="${b.stop_after_win ? "Stops after the next win (click to change)" : "Stop this bot: right away or after a win"}" aria-label="Stop"><span class="stop">■</span>${b.stop_after_win ? " after win" : ""}</button>`
+      ? `<button class="bi-act" data-stop="${esc(b.id)}" title="${b.stop_after_win ? "Stops after the win that clears the debt (click to change)" : "Stop this bot: right away or after a win"}" aria-label="Stop"><span class="stop">■</span>${b.stop_after_win ? " after win" : ""}</button>`
       : `<button class="bi-act" data-start="${esc(b.id)}" title="Start this bot" aria-label="Start"><span class="go">▶</span></button>`;
     // an open bet: its side as a red arrow, its cost and the win chance (the coin's move is on top of the list)
     const chance = b.bet_side && b.bet_chance != null
@@ -1070,7 +1070,7 @@ function render() {
         <button class="btn" data-act="archive" ${running || s.bet ? "disabled" : ""} title="${s.bet ? "A bet is open: let it pay out first" : "Put this bot away for review: it keeps its settings, history and log, but leaves the list and can't start until restored"}">🗄 Archive</button>
         <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>`}
       </div>
-      <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the next win</b>' : ""}</div>
+      <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the win that clears the debt</b>' : ""}</div>
     </div>
     <div class="tiles">
       <div class="tile" data-chart="budget" style="--tone:var(--accent)"><div class="k" title="Click: the chart over time · ${budgetOf(s) > 0 ? "This bot's own money: Budget + profit since Reset, with the open bet at what it's worth now" : "The account's cash plus this bot's open bet at what it's worth now"}">💰 ${budgetOf(s) > 0 ? "Budget balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${!(budgetOf(s) > 0) && s.bet && s.wallet != null ? `<div class="muted" style="font-size:11px">cash ${money(s.wallet)} · in bet ${money(s.balance - s.wallet)}</div>` : ""}${budgetOf(s) > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
@@ -1525,7 +1525,7 @@ function stopMenu(btn, id, afterWin) {
   m.id = "stopMenu"; m.className = "stopmenu"; m.dataset.for = id; m.setAttribute("role", "menu");
   const items = [["stop", "■ Stop right away", "Now, even mid-ladder. An open bet is paid out when the bot runs again."],
     afterWin ? ["cancel_after_win", "↩ Don't wait for a win", "Keep running"]
-             : ["stop_after_win", "🏁 Stop after a win", "Keep betting and stop at the next winning bet, back at step 1"]];
+             : ["stop_after_win", "🏁 Stop after a win", "Keep betting and stop at the next win that clears the debt (Recover over 2: it may take 2 wins in a row)"]];
   m.innerHTML = items.map(([a, t, h]) => `<button type="button" role="menuitem" data-a="${a}" title="${esc(h)}">${t}<small>${esc(h)}</small></button>`).join("");
   document.body.append(m);
   const r = btn.getBoundingClientRect();

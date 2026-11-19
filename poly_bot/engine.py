@@ -56,7 +56,7 @@ class Bot:
         self._next_confirm = 0.0
         self.done_round = ""           # the round already bet on (one bet per round)
         self.halted = ""               # why the bot stopped by itself: "ladder" (needs Reset), "target", "after_win"
-        self.stop_after_win = False    # Stop after a win: stop at the next winning bet
+        self.stop_after_win = False    # Stop after a win: stop at the next win that leaves nothing owed
         self.halt_message = ""
         self.phase, self.message = "idle", ""
         self.live: dict = {}           # the open bet's live price, for the page
@@ -464,9 +464,13 @@ class Bot:
                                  f"to start counting again, or raise Until earn.")
             return
         if won and self.stop_after_win:
-            self.stop_after_win = False
-            self._halt("after_win", "Stopped after a win, as asked (Stop after a win).")
-            return
+            if self.ladder.streak_lost > 0:      # Recover over N wins: wait for the win that clears the debt
+                self.log.info("Stop after a win: $%.2f still owed, keeps betting until a win clears it",
+                              self.ladder.streak_lost)
+            else:
+                self.stop_after_win = False
+                self._halt("after_win", "Stopped after a win, as asked (Stop after a win).")
+                return
         if not won and self.cfg.max_steps and self.ladder.step > self.cfg.max_steps:
             self._ladder_end(f"{self.cfg.max_steps} losses in a row (Max losses in a row).")
 

@@ -212,13 +212,14 @@ class Controller:
         return self.status()
 
     def stop_after_win(self) -> dict:
-        """Stop at the next winning bet (the bot halts itself as "after_win")."""
+        """Stop at the next win that leaves nothing owed (the bot halts itself as "after_win"); with Recover over
+        N wins that can take N wins in a row."""
         self._check_owned()
         if not self.running:
             raise ValueError("The bot isn't running.")
         self.bot.stop_after_win = True
         self.bot.save()
-        self.log.info("Stop after a win: the bot stops at its next winning bet")
+        self.log.info("Stop after a win: the bot stops at the next win that clears the debt")
         return self.status()
 
     def cancel_after_win(self) -> dict:

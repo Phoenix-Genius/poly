@@ -70,6 +70,19 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(bot.halted, "")
         self.assertTrue(json.loads(bot.state_path.read_text()).get("stop_after_win") is False)
 
+    def test_stop_after_win_waits_for_the_debt_to_clear(self):
+        bot = self.make(sizing="recover", recover_wins=2)
+        bot.stop_after_win = True
+        self.play(bot, "down")                       # a loss: owes
+        self.play(bot, "up")                         # one win pays half: still owed, keeps going
+        self.assertEqual(bot.halted, "")
+        self.assertTrue(bot.stop_after_win)
+        self.assertGreater(bot.ladder.streak_lost, 0)
+        self.play(bot, "up")                         # the 2nd win in a row clears it: stops
+        self.assertEqual(bot.halted, "after_win")
+        self.assertEqual(bot.ladder.streak_lost, 0)
+        self.assertFalse(bot.stop_after_win)
+
     def test_one_bet_per_round(self):
         bot = self.make()
         self.clock.t += 5

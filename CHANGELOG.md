@@ -4,6 +4,18 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.22] - 2026-11-19
+
+### Stop after a win waits for the debt to clear
+- **What:** 🏁 Stop after a win now stops at the first win that leaves nothing owed. With Recover over 2, a lone win
+  that pays back only half keeps the bot betting; it stops after the win that clears the rest (2 wins in a row, or
+  the win after). With Recover over 1 nothing changes. The menu hint and status text say so.
+- **Why:** the owner: "on rec2 mode. stop after a win means 2wins after." Pelican stopped after one win at step 4
+  with $6.40 still owed.
+- **How:** engine.py `_settle`: halt "after_win" only when `ladder.streak_lost` is 0; otherwise log what's still
+  owed and keep the flag.
+- **Tests:** test_engine `test_stop_after_win_waits_for_the_debt_to_clear`.
+
 ## [1.4.21] - 2026-11-19
 
 ### Archive a bot (kept for review, not deleted)
