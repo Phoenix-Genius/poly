@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Poly Martingale</title>
+<title>Poly</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23FACC15'/%3E%3Ctext x='32' y='49' text-anchor='middle' font-family='Arial,Helvetica,sans-serif' font-size='46' font-weight='900' fill='%2386EFAC'%3EP%3C/text%3E%3C/svg%3E">
 <style>
   :root {
@@ -59,6 +59,7 @@
     #mainCol { padding: 12px 16px 40px; }
     #bots { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
     #bots .bot-item { min-width: 230px; }
+    .bot-group .g-items { flex-direction: row; }
   }
   .spacer { flex: 1; }
 
@@ -86,6 +87,22 @@
   b.hl.pos { color: var(--green); background: color-mix(in srgb, var(--green) 20%, transparent); }
   b.hl.neg { color: var(--red); background: color-mix(in srgb, var(--red) 20%, transparent); }
   #bots { display: flex; flex-direction: column; gap: 6px; }
+  /* bots grouped by the first word of their name (Stallion…, TT…): a folding box with the group's totals */
+  .bot-group { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 60%, transparent); padding: 0 6px; }
+  .bot-group[open] { padding-bottom: 6px; }
+  .bot-group > summary { cursor: pointer; display: flex; align-items: baseline; gap: 6px; padding: 5px 0; font-size: 13px; list-style: none; }
+  .bot-group > summary::-webkit-details-marker { display: none; }
+  .bot-group > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+  .bot-group[open] > summary::before { content: "▾"; }
+  .bot-group > summary .g-name { font-weight: 650; }
+  .bot-group > summary .g-sum { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .bot-group > summary .g-sum b { font-weight: 650; }
+  .bot-group .g-items { display: flex; flex-direction: column; gap: 6px; }
+  .bot-group[draggable="true"] > summary { cursor: grab; }
+  .bot-group.dragging { opacity: .4; }
+  .bot-group.drop-before { box-shadow: 0 -3px 0 0 var(--accent); } .bot-group.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+  .side-head #groupBtn { margin-left: auto; padding: 0 6px; font-size: 11px; }
+  .side-head #groupBtn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
   .arch-group { margin-top: 10px; } .arch-group > summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
   .arch-item { border: 1px dashed var(--line); padding: 5px 8px; margin-top: 6px; background: var(--panel); cursor: pointer; opacity: .8; }
   .arch-item:hover { opacity: 1; border-color: var(--muted); }
@@ -389,7 +406,8 @@
         <button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>Sign out</button></div>
       <div class="side-tools"><button class="btn" id="allHistBtn" title="Every bot's results and bets in one table">📋 History</button><button class="btn" id="roundsBtn" title="Polymarket's past rounds: results, prices and moves, for research">🔎 Rounds</button>
         <button class="btn primary" id="newBot" title="Create a paper or live bot">＋ New</button></div>
-      <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><div class="side-totals" id="sideTotals"></div></div>
+      <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><div class="side-totals" id="sideTotals"></div>
+        <button class="btn" id="groupBtn" title="Group bots whose names start with the same word (Stallion…, TT…)">▤ Group</button></div>
       <div id="sideMarket"></div>
       <nav id="bots"></nav>
       <div id="archivedBots"></div>
@@ -528,17 +546,27 @@ async function saveOrder(ids, pinned, focusId) {
   if (focusId) document.querySelector(`.bot-item[data-id="${CSS.escape(focusId)}"]`)?.focus();
 }
 function clearDrop() { document.querySelectorAll(".drop-before, .drop-after").forEach(el => el.classList.remove("drop-before", "drop-after")); }
+// What a drop lands on: a bot card, or a whole group box (its header, or anywhere in it while a group is dragged).
+// dragId is a bot's id, or "group:<word>" while a group box is dragged (it moves all its bots as one block).
+const dragGroupBox = () => dragId?.startsWith("group:") ? document.querySelector(`.bot-group[data-g="${CSS.escape(dragId.slice(6))}"]`) : null;
+const blockIds = el => el.classList.contains("bot-group") ? [...el.querySelectorAll(".bot-item")].map(x => x.dataset.id) : [el.dataset.id];
 function dropSpot(e) {
-  const item = e.target.closest(".bot-item");
-  if (!item || item.dataset.id === dragId) return null;
-  const r = item.getBoundingClientRect(), row = getComputedStyle($("#bots")).flexDirection === "row";
+  const list = $("#bots");
+  let item = dragGroupBox()
+    ? [...list.children].find(x => x.contains(e.target))                 // a group drops beside a whole block
+    : e.target.closest(".bot-group > summary")?.parentElement || e.target.closest(".bot-item");
+  if (!item || !list.contains(item)) return null;
+  const moving = dragGroupBox() ? blockIds(dragGroupBox()) : [dragId];
+  if (blockIds(item).some(id => moving.includes(id))) return null;
+  const r = (item.classList.contains("bot-group") && !dragGroupBox() ? item.querySelector("summary") : item).getBoundingClientRect();
+  const row = getComputedStyle(list).flexDirection === "row";
   return {item, after: row ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2};
 }
 function wireBotOrder() {
   const list = $("#bots");
   list.addEventListener("dragstart", e => {
-    const item = e.target.closest(".bot-item"); if (!item) return;
-    dragId = item.dataset.id;
+    const item = e.target.closest(".bot-item, .bot-group"); if (!item) return;
+    dragId = item.classList.contains("bot-group") ? "group:" + item.dataset.g : item.dataset.id;
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", dragId);
     item.classList.add("dragging");
@@ -553,14 +581,14 @@ function wireBotOrder() {
   list.addEventListener("drop", e => {
     if (!dragId) return;
     e.preventDefault();
-    const spot = dropSpot(e), moved = dragId;
+    const spot = dropSpot(e), box = dragGroupBox(), moved = box ? blockIds(box) : [dragId];
     clearDrop(); dragId = null;
     if (!spot) return renderBots();
-    const target = bots.find(b => b.id === spot.item.dataset.id);
-    const ids = bots.map(b => b.id).filter(id => id !== moved);
-    ids.splice(ids.indexOf(target.id) + (spot.after ? 1 : 0), 0, moved);
-    const pinned = bots.filter(b => b.pinned && b.id !== moved).map(b => b.id);
-    if (target.pinned) pinned.push(moved);
+    const targets = blockIds(spot.item), target = bots.find(b => b.id === targets[spot.after ? targets.length - 1 : 0]);
+    const ids = bots.map(b => b.id).filter(id => !moved.includes(id));
+    ids.splice(ids.indexOf(target.id) + (spot.after ? 1 : 0), 0, ...moved);
+    const pinned = bots.filter(b => b.pinned && !moved.includes(b.id)).map(b => b.id);
+    if (target.pinned && !box) pinned.push(...moved);     // a bot dropped among pinned ones is pinned; a group stays unpinned
     saveOrder(ids, pinned);
   });
   list.addEventListener("dragend", () => { clearDrop(); if (dragId) { dragId = null; renderBots(); } });
@@ -611,6 +639,33 @@ function stepPips(step, fits) {
   const n = Math.min(Math.max(fits ?? step, 1), 20);
   return Array.from({length: n}, (_, i) => `<i class="${i + 1 < step ? "on" : i + 1 === step ? "now" : ""}"></i>`).join("");
 }
+// --- grouping: bots whose names start with the same word ("Stallion25-35", "Stallion45-55"; "TT 30", "TT 60") fold
+// into one box, placed where its first bot is in the order. Pinned bots stay on their own at the top; a word only
+// one bot has is no group. The ▤ Group button turns it on or off (kept in this browser).
+const store = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
+let groupOn = store("groupBots", true), groupOpen = store("groupOpen", {});
+const groupWord = b => (String(b.name || "").match(/^[A-Za-z]+/) || [""])[0];
+function botBlocks() {                     // [[bot], [bot, bot, …] with .key/.word for a group, …] in the list order
+  const count = {};
+  if (groupOn) for (const b of bots) if (!b.pinned && groupWord(b)) { const k = groupWord(b).toLowerCase(); count[k] = (count[k] || 0) + 1; }
+  const out = [], seen = {};
+  for (const b of bots) {
+    const k = groupOn && !b.pinned ? groupWord(b).toLowerCase() : "";
+    if (!k || count[k] < 2) { out.push([b]); continue; }
+    if (seen[k]) { seen[k].push(b); continue; }
+    const g = [b]; g.key = k; g.word = groupWord(b); seen[k] = g; out.push(g);
+  }
+  return out;
+}
+function groupBox(g, card) {
+  const run = g.filter(b => b.running).length, pnl = g.reduce((a, b) => a + (b.pnl || 0), 0);
+  const open = groupOpen[g.key] ?? true;
+  return `<details class="bot-group" data-g="${esc(g.key)}" draggable="true" title="Drag the box to move the whole group" ${open || g.some(b => b.id === current) ? "open" : ""}>
+    <summary title="Bots whose names start with “${esc(g.word)}”"><span class="g-name" data-no-i18n>${esc(g.word)}</span><span class="muted">${g.length}</span>
+      <span class="g-sum">${run ? `<span class="dot run"></span> ${run} · ` : ""}<b class="${tone(pnl)}" title="The group's profit since Reset, added up">${money(pnl, true)}</b></span></summary>
+    <div class="g-items">${g.map(card).join("")}</div></details>`;
+}
+$("#groupBtn").onclick = () => { groupOn = !groupOn; try { localStorage.setItem("groupBots", JSON.stringify(groupOn)); } catch (e) {} renderBots(); };
 function renderBots() {
   const running = bots.filter(b => b.running).length;
   const sum = f => bots.filter(f).reduce((a, b) => a + (b.pnl || 0), 0);
@@ -621,7 +676,7 @@ function renderBots() {
     `<span title="Paper bots' profit since Reset, added up">Paper <b class="${tone(sum(b => b.network !== "live"))}">${money(sum(b => b.network !== "live"), true)}</b></span>` +
     (live ? `<span title="Live bots' profit since Reset, added up">Live <b class="${tone(sum(b => b.network === "live"))}">${money(sum(b => b.network === "live"), true)}</b></span>` : "");
   document.body.classList.toggle("no-bots", !bots.length && !archived.length);
-  $("#bots").innerHTML = bots.map(b => {
+  const card = b => {
     const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
     const act = b.locked ? "" : b.running
       ? `<button class="bi-act" data-stop="${esc(b.id)}" title="${b.stop_after_win ? "Stops after the win that clears the debt (click to change)" : "Stop this bot: right away or after a win"}" aria-label="Stop"><span class="stop">■</span>${b.stop_after_win ? " after win" : ""}</button>`
@@ -640,7 +695,12 @@ function renderBots() {
         <span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
       <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
     </div>`;
-  }).join("");
+  };
+  $("#groupBtn").setAttribute("aria-pressed", String(groupOn));
+  $("#bots").innerHTML = botBlocks().map(g => g.key ? groupBox(g, card) : card(g[0])).join("");
+  for (const el of document.querySelectorAll(".bot-group")) el.ontoggle = () => {
+    groupOpen[el.dataset.g] = el.open; try { localStorage.setItem("groupOpen", JSON.stringify(groupOpen)); } catch (e) {}
+  };
   renderArchived();
   for (const el of document.querySelectorAll(".bot-item")) el.onclick = () => select(el.dataset.id);
   for (const el of document.querySelectorAll(".bi-pin")) el.onclick = async e => {

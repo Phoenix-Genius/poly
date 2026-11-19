@@ -4,6 +4,22 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.24] - 2026-11-19
+
+### Bot list: group bots by name
+- **What:** bots whose names start with the same word (Stallion25-35, Stallion45-55…; TT 30, TT 60…) fold into one box with
+  their count, how many run and their profit added up. **▤ Group** next to "Bots" turns it on or off.
+- **Why:** the owner: "make bet list grouping available by its name prefix. such as stallion and TT".
+- **How:** index.html only. The word is the name's leading letters, case ignored; a group needs 2+ bots; pinned bots stay
+  on their own at the top; the box sits where its first bot is in the order, and drag and drop still works inside it.
+  On/off and each box open/closed are kept in the browser. A group box drags too: by its header, it moves all its bots
+  as one block (dropped beside a bot or another group).
+
+### Tab title: "Poly"
+- **What:** the browser tab says "Poly" instead of "Poly Martingale".
+- **Why:** the owner: "remove martingale word from tab title".
+- **How:** index.html `<title>`. The footer, sign-in emails and MAIL_FROM keep the name.
+
 ## [1.4.23] - 2026-11-19
 
 ### Time left: a lower limit (≥ s left), an entry window for conditions mode
