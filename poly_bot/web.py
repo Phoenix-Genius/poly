@@ -44,6 +44,7 @@ PM = Polymarket()                     # shared by all bots: one cache of series 
 HISTORY = History(PM)                 # past rounds for the real simulation, shared too
 COIN_PATHS = CoinPaths()              # the coin's own price inside those rounds (move mode)
 RUNNING_MARK = ".running"             # in a bot's folder while it should be running
+ARCHIVE_MARK = ".archived"            # in an archived bot's folder: when it was archived (kept for review, can't start)
 STARTED = str(time.time())            # changes on every app start; an open page reloads its settings form then
 
 
@@ -167,8 +168,18 @@ class Controller:
             raise ValueError("This bot is open in another window of the app. Close it there first.")
 
     # --- actions -----------------------------------------------------------------------------------------
+    @property
+    def archived(self) -> str:
+        """When the bot was archived ("2026-11-19 10:30:00"), or "" when it isn't."""
+        try:
+            return (self.folder / ARCHIVE_MARK).read_text().strip() or "archived"
+        except OSError:
+            return ""
+
     def start(self) -> dict:
         self._check_owned()
+        if self.archived:
+            raise ValueError("This bot is archived. Restore it first.")
         if self.running:
             return self.status()
         self.pm.series_id(self.cfg.coin, self.cfg.timeframe)      # fails early for a coin without that timeframe
@@ -186,7 +197,8 @@ class Controller:
     @property
     def should_resume(self) -> bool:
         """Was this bot running when the app last stopped? (Not if it halted by itself since.)"""
-        return (self.folder / RUNNING_MARK).exists() and not self.bot.halted and not self.locked_elsewhere
+        return ((self.folder / RUNNING_MARK).exists() and not self.bot.halted and not self.locked_elsewhere
+                and not self.archived)
 
     def stop(self, keep_mark: bool = False) -> dict:
         """Stop the bot. keep_mark=True when the whole app is shutting down: it starts again with the app."""
@@ -420,7 +432,7 @@ class Controller:
                # the market's price of the bet's side now = its win chance (the bot polls it every 2-5 s)
                "bet_chance": self.bet_chance(),
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
-               "budget": self.cfg.budget > 0}
+               "budget": self.cfg.budget > 0, "archived": self.archived}
         if full:
             phase, message = self._phase()
             bal = self.balance()
@@ -697,11 +709,15 @@ class App:
         """Every bot: pinned ones first, each group in the order dragged into (see order())."""
         order, pins = self.order()
         rank = {i: n for n, i in enumerate(order)}
-        bots = [{**c.summary(full=True), "pinned": c.id in pins} for c in self.controllers.values()]
-        bots.sort(key=lambda b: (not b["pinned"], rank.get(b["id"], len(rank))))
+        cards = [{**c.summary(full=True), "pinned": c.id in pins} for c in self.controllers.values()]
+        cards.sort(key=lambda b: (not b["pinned"], rank.get(b["id"], len(rank))))
+        bots = [b for b in cards if not b["archived"]]
+        archived = sorted((b for b in cards if b["archived"]), key=lambda b: b["archived"], reverse=True)
         # the top of the bot list: per coin and round length, the newest round a running bot is watching
         markets: dict = {}
         for c in self.controllers.values():
+            if c.archived:
+                continue
             try:
                 m = c.market()
             except Exception:             # the strip must never fail the list
@@ -711,14 +727,16 @@ class App:
             key, old = (m["coin"], m["timeframe"]), markets.get((m["coin"], m["timeframe"]))
             if not old or m["slug"] > old["slug"] or (m["slug"] == old["slug"] and "up" in m and "up" not in old):
                 markets[key] = m
-        return {"bots": bots, "markets": list(markets.values()), "version": __version__, "started": STARTED}
+        return {"bots": bots, "archived": archived, "markets": list(markets.values()), "version": __version__,
+                "started": STARTED}
 
     def all_history(self) -> dict:
         """Every bot's results side by side (one row each, from its trade log) and every bet of every bot merged,
         newest first (the newest ALL_HISTORY_MAX): the page's 📋 History."""
         order, pins = self.order()
         rank = {i: n for n, i in enumerate(order)}
-        ctrls = sorted(self.controllers.values(), key=lambda c: (c.id not in pins, rank.get(c.id, len(rank))))
+        ctrls = sorted((c for c in self.controllers.values() if not c.archived),     # archived bots are out of play
+                       key=lambda c: (c.id not in pins, rank.get(c.id, len(rank))))
         bots, bets = [], []
         for c in ctrls:
             try:
@@ -814,8 +832,8 @@ class App:
         return random.choice(free) if free else f"{random.choice(ANIMALS)} {random.randint(2, 999)}"
 
     def create(self, body: dict) -> dict:
-        if self.max_bots and len(self.controllers) >= self.max_bots:
-            raise ValueError(f"You can have up to {self.max_bots} bots. Delete one to make another.")
+        if self.max_bots and sum(not c.archived for c in self.controllers.values()) >= self.max_bots:
+            raise ValueError(f"You can have up to {self.max_bots} bots. Archive or delete one to make another.")
         src = self.get(str(body["copy_from"])) if body.get("copy_from") else None    # duplicate one of your bots
         preset = None
         if body.get("preset"):                                                         # or start from a preset
@@ -848,6 +866,36 @@ class App:
         log.info("New bot %s%s (%s %s)%s", self.prefix, bot_id, coin, tf,
                  f", a copy of {self.prefix}{src.id}" if src else "")
         return {"id": bot_id, **self.list()}
+
+    def archive(self, bot_id: str) -> dict:
+        """Put a stopped bot away for review: it keeps its settings, history and log, leaves the bot list (and the
+        all-bots History) for the Archived group, and can't start until it's restored."""
+        ctl = self.get(bot_id)
+        if ctl.archived:
+            return self.list()
+        if ctl.running:
+            raise ValueError("Stop the bot first, then archive it.")
+        if ctl.bot.bet:
+            raise ValueError("This bot has a bet open. Start it and let the round pay out first.")
+        (ctl.folder / RUNNING_MARK).unlink(missing_ok=True)
+        (ctl.folder / ARCHIVE_MARK).write_text(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() + 9 * 3600)))
+        with self._order_lock:                    # unpinned, so a restore puts it back in the plain list
+            order, pins = self.order()
+            self._write_order(order, [i for i in pins if i != bot_id])
+        ctl.log.info("Archived")
+        log.info("Archived bot %s%s", self.prefix, bot_id)
+        return self.list()
+
+    def unarchive(self, bot_id: str) -> dict:
+        ctl = self.get(bot_id)
+        if not ctl.archived:
+            return self.list()
+        if self.max_bots and sum(not c.archived for c in self.controllers.values()) >= self.max_bots:
+            raise ValueError(f"You can have up to {self.max_bots} bots. Archive or delete one to restore this one.")
+        (ctl.folder / ARCHIVE_MARK).unlink(missing_ok=True)
+        ctl.log.info("Restored from the archive")
+        log.info("Restored bot %s%s from the archive", self.prefix, bot_id)
+        return self.list()
 
     def delete(self, bot_id: str) -> dict:
         ctl = self.get(bot_id)
@@ -1026,6 +1074,8 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
             bot_id, action = m.groups()
             if action == "delete":
                 return self._call(app.delete, bot_id)
+            if action in ("archive", "unarchive"):
+                return self._call(getattr(app, action), bot_id)
             if action == "pin":
                 return self._call(app.pin, bot_id, body)
             if action in ("start", "check"):

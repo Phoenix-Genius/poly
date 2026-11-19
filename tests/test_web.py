@@ -334,6 +334,44 @@ class AppTest(unittest.TestCase):
         self.app.delete("eth-15m")
         self.assertNotIn("eth-15m", self.app.controllers)
 
+    def test_archive_and_restore(self):
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        (ctl.folder / "trades.csv").write_text("kept\n")
+        self.app.pin("btc-5m", {"pinned": True})
+        d = self.app.archive("btc-5m")
+        self.assertEqual([b["id"] for b in d["bots"]], [])
+        self.assertEqual([b["id"] for b in d["archived"]], ["btc-5m"])
+        self.assertTrue(d["archived"][0]["archived"])
+        self.assertTrue(ctl.status()["archived"])               # its page still opens, for review
+        self.assertTrue((ctl.folder / "trades.csv").exists())   # nothing is deleted
+        self.assertEqual(self.app.all_history()["bots"], [])     # out of the all-bots History
+        with self.assertRaises(ValueError):
+            ctl.start()                                          # can't start until restored
+        (ctl.folder / ".running").touch()
+        self.assertFalse(ctl.should_resume)                      # nor with the app
+        self.app.max_bots = 1                                    # an archived bot doesn't count toward the limit
+        self.app.create({"coin": "ETH", "timeframe": "5m"})
+        with self.assertRaises(ValueError):
+            self.app.unarchive("btc-5m")                         # ... but restoring it would go over
+        self.app.max_bots = 0
+        d = self.app.unarchive("btc-5m")
+        self.assertIn("btc-5m", [b["id"] for b in d["bots"]])
+        self.assertFalse(next(b for b in d["bots"] if b["id"] == "btc-5m")["pinned"])
+        self.assertEqual(d["archived"], [])
+
+    def test_archive_refuses_running_or_open_bet(self):
+        from unittest import mock
+        self.app.create({"coin": "BTC", "timeframe": "5m"})
+        ctl = self.app.get("btc-5m")
+        ctl.bot.bet = {"slug": "x", "side": "up", "cost": 1}
+        with self.assertRaises(ValueError):
+            self.app.archive("btc-5m")
+        ctl.bot.bet = None
+        with mock.patch.object(type(ctl), "running", new_callable=mock.PropertyMock, return_value=True):
+            with self.assertRaises(ValueError):
+                self.app.archive("btc-5m")
+
     def test_keys_and_switch_to_live(self):
         ctl = self.app.get(self.app.create({"coin": "BTC", "timeframe": "5m"})["id"])
         s = ctl.put_settings({"network": "live"})                      # empty budget = the whole balance

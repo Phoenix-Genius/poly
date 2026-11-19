@@ -86,6 +86,12 @@
   b.hl.pos { color: var(--green); background: color-mix(in srgb, var(--green) 20%, transparent); }
   b.hl.neg { color: var(--red); background: color-mix(in srgb, var(--red) 20%, transparent); }
   #bots { display: flex; flex-direction: column; gap: 6px; }
+  .arch-group { margin-top: 10px; } .arch-group > summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
+  .arch-item { border: 1px dashed var(--line); padding: 5px 8px; margin-top: 6px; background: var(--panel); cursor: pointer; opacity: .8; }
+  .arch-item:hover { opacity: 1; border-color: var(--muted); }
+  .arch-item.active { opacity: 1; border-style: solid; border-color: var(--accent); background: var(--active-bg); }
+  .arch-item .arch-date { font-size: 11px; }
+  .badge.arch { background: color-mix(in srgb, var(--muted) 20%, transparent); }
   .bot-item { display: block; border: 1px solid var(--line); border-left: 4px solid var(--state, var(--line)); padding: 6px 8px 6px 8px;
               background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s; }
   .bot-item.st-run { --state: var(--green); } .bot-item.st-halt { --state: var(--red); }
@@ -386,6 +392,7 @@
       <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><div class="side-totals" id="sideTotals"></div></div>
       <div id="sideMarket"></div>
       <nav id="bots"></nav>
+      <div id="archivedBots"></div>
     </div></div>
     <div id="leftFoot"><button class="btn" id="theme" title="Light / dark">◐</button><span>🎲 Poly Martingale v{{version}}</span>
       <span class="spacer"></span><a class="credit" id="dbipCredit" hidden href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></div>
@@ -480,6 +487,7 @@ const secs = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + "s" : s 
 const fromLink = (location.hash.match(/^#bot=([\w-]+)/) || [])[1];   // http://127.0.0.1:8090/#bot=btc-5m opens that bot
 const HOSTED = document.documentElement.dataset.hosted === "1";
 let me = null;
+let archived = [], archOpen = false;   // archived bots (kept for review), and whether their group is open
 let schema = null, bots = [], current = fromLink || localStorage.getItem("bot") || "", status = null, formDirty = false, timer = null, ticks = 0, previewTimer = null;
 const folded = new Set(JSON.parse(localStorage.getItem("folded") || "[]"));
 
@@ -587,14 +595,14 @@ function renderMarkets() {
 }
 async function loadBots() {
   const d = await api("/api/bots");
-  bots = d.bots;
+  bots = d.bots; archived = d.archived || [];
   markets = d.markets || [];
   if (schema && d.started && d.started !== schema.started && !formDirty) {
     // the app was restarted (maybe updated): reload, so an open tab gets the new page and settings
     location.reload();
     return;
   }
-  if (!bots.find(b => b.id === current)) current = bots[0]?.id || "";
+  if (!bots.find(b => b.id === current) && !archived.find(b => b.id === current)) current = bots[0]?.id || "";
   if (!dragId) renderBots();          // not mid-drag: a redraw would drop the card being dragged
 }
 // fits = how many steps the budget reaches in this streak (lost ones included). One pip per reachable step:
@@ -612,7 +620,7 @@ function renderBots() {
   $("#sideTotals").innerHTML = `<span><span class="dot run"></span> ${running} running</span>` +
     `<span title="Paper bots' profit since Reset, added up">Paper <b class="${tone(sum(b => b.network !== "live"))}">${money(sum(b => b.network !== "live"), true)}</b></span>` +
     (live ? `<span title="Live bots' profit since Reset, added up">Live <b class="${tone(sum(b => b.network === "live"))}">${money(sum(b => b.network === "live"), true)}</b></span>` : "");
-  document.body.classList.toggle("no-bots", !bots.length);
+  document.body.classList.toggle("no-bots", !bots.length && !archived.length);
   $("#bots").innerHTML = bots.map(b => {
     const st = b.locked ? "lock" : b.halted ? "halt" : b.running ? "run" : "stop";
     const act = b.locked ? "" : b.running
@@ -633,11 +641,12 @@ function renderBots() {
       <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
     </div>`;
   }).join("");
+  renderArchived();
   for (const el of document.querySelectorAll(".bot-item")) el.onclick = () => select(el.dataset.id);
   for (const el of document.querySelectorAll(".bi-pin")) el.onclick = async e => {
     e.stopPropagation();
     const b = bots.find(x => x.id === el.dataset.pin);
-    try { bots = (await api(`/api/bots/${b.id}/pin`, {pinned: !b.pinned})).bots; renderBots(); }
+    try { const d = await api(`/api/bots/${b.id}/pin`, {pinned: !b.pinned}); bots = d.bots; archived = d.archived || archived; renderBots(); }
     catch (err) { toast(err.message); }
   };
   for (const el of document.querySelectorAll(".bi-act")) el.onclick = async e => {
@@ -650,6 +659,22 @@ function renderBots() {
     catch (err) { toast(err.message); }
     loadBots();
   };
+}
+// Archived bots: a folded group under the list; a click opens the bot's page to review it (History, log, settings)
+function renderArchived() {
+  const box = $("#archivedBots");
+  if (!archived.length) { box.innerHTML = ""; return; }
+  const open = archOpen || archived.some(b => b.id === current);
+  box.innerHTML = `<details class="arch-group" ${open ? "open" : ""}><summary title="Bots put away for review: they keep their settings, history and log, and can't start until restored">🗄 Archived <span class="muted">${archived.length}</span></summary>
+    ${archived.map(b => `<div class="arch-item ${b.id === current ? "active" : ""}" data-id="${esc(b.id)}" tabindex="0" title="Open to review · archived ${esc(b.archived)} JST">
+      <div class="bi-top"><span class="bi-name" data-no-i18n>${esc(b.name)}</span><span class="chip ${b.network === "live" ? "live" : "paper"}">${b.network === "live" ? "LIVE" : "paper"}</span></div>
+      <div class="bi-money"><span class="muted">${esc(b.coin)} ${esc(b.timeframe)}</span><span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
+      <div class="muted arch-date">🗄 ${esc(String(b.archived).slice(0, 16))}</div></div>`).join("")}</details>`;
+  box.querySelector("details").ontoggle = e => { archOpen = e.target.open; };
+  for (const el of box.querySelectorAll(".arch-item")) {
+    el.onclick = () => select(el.dataset.id);
+    el.onkeydown = e => { if (e.key === "Enter") select(el.dataset.id); };
+  }
 }
 function select(id) {
   if (formDirty && id !== current && !confirm("Discard unsaved settings?")) return;
@@ -1033,13 +1058,17 @@ function render() {
       <h1 data-no-i18n>${esc(s.name)}</h1>
       <span class="badge">${esc(s.coin)} · ${esc(s.timeframe)}</span>
       ${s.network === "live" ? '<span class="badge live">💵 LIVE · real money</span>' : '<span class="badge paper">📝 PAPER</span>'}
+      ${s.archived ? `<span class="badge arch" title="Kept for review: it can't start until restored">🗄 Archived ${esc(String(s.archived).slice(0, 16))}</span>` : ""}
       <span style="flex:1"></span>
       <div class="actions">
-        ${running ? `<button class="btn stop" data-act="stopmenu" aria-haspopup="menu">■ ${s.stop_after_win ? "Stop after win…" : "Stop"} ▾</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
+        ${s.archived ? `<button class="btn go" data-act="unarchive" title="Back to the bot list (stopped)">↩ Restore</button>
+        <button class="btn" data-act="duplicate" title="New bot with this bot's settings and Polymarket keys">⧉ Duplicate</button>
+        <button class="btn" data-act="delete" title="Delete this bot and its files">🗑</button>` : `${running ? `<button class="btn stop" data-act="stopmenu" aria-haspopup="menu">■ ${s.stop_after_win ? "Stop after win…" : "Stop"} ▾</button>` : `<button class="btn go" data-act="start" ${s.locked ? "disabled" : ""}>▶ Start</button>`}
         <button class="btn" data-act="resetmenu" aria-haspopup="menu" ${running ? "disabled" : ""} title="Reset, or reset only the ladder">↺ Reset ▾</button>
         ${s.network === "live" ? "" : `<button class="btn" data-act="paper_reset" ${running ? "disabled" : ""} title="Fresh paper account with the Paper balance">🧾 Reset paper</button>`}
         <button class="btn" data-act="duplicate" title="New bot with this bot's settings and Polymarket keys">⧉ Duplicate</button>
-        <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>
+        <button class="btn" data-act="archive" ${running || s.bet ? "disabled" : ""} title="${s.bet ? "A bet is open: let it pay out first" : "Put this bot away for review: it keeps its settings, history and log, but leaves the list and can't start until restored"}">🗄 Archive</button>
+        <button class="btn" data-act="delete" ${running ? "disabled" : ""} title="Delete this bot and its files">🗑</button>`}
       </div>
       <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the next win</b>' : ""}</div>
     </div>
@@ -1538,8 +1567,17 @@ async function doAct(a) {
     start: status.network === "live" ? `Start LIVE trading with REAL money?\n\nBudget: ${budgetOf(status) > 0 ? moneyFull(status.settings.budget_usd) + " (the most this bot may lose)" : "none: the WHOLE balance " + moneyFull(status.balance) + " can be lost"}\nFirst bet: about ${moneyFull(status.ladder.rows[status.step - 1]?.cost)}` : ""};
   if (a === "delete") {
     if (!confirm(confirms.delete)) return;
-    try { const d = await api(`/api/bots/${current}/delete`, {}); bots = d.bots; current = bots[0]?.id || ""; status = null; renderBots(); buildForm(); refresh(); }
+    try { const d = await api(`/api/bots/${current}/delete`, {}); bots = d.bots; archived = d.archived || []; current = bots[0]?.id || ""; status = null; renderBots(); buildForm(); refresh(); }
     catch (e) { toast(e.message); }
+    return;
+  }
+  if (a === "archive" || a === "unarchive") {
+    if (a === "archive" && !confirm(`Archive bot "${status.name}"? It keeps its settings, history and log for review, leaves the bot list and can't start until you restore it.`)) return;
+    try {
+      const d = await api(`/api/bots/${current}/${a}`, {}); bots = d.bots; archived = d.archived || [];
+      if (a === "archive") archOpen = true;
+      status = null; renderBots(); refresh(); toastOk(a === "archive" ? "Archived: it's under 🗄 Archived" : "Restored to the bot list");
+    } catch (e) { toast(e.message); }
     return;
   }
   if (a === "check") { const b = $("#checkKeys"); if (b) { b.disabled = true; b.textContent = "Checking…"; } }

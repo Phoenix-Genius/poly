@@ -4,6 +4,21 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.21] - 2026-11-19
+
+### Archive a bot (kept for review, not deleted)
+- **What:** a stopped bot without an open bet can be archived (🗄 Archive, next to 🗑). It keeps its settings, history
+  and log, leaves the bot list for a folded 🗄 Archived group under it (name, market, profit, W/L, date), and can't
+  start (nor start again with the app) until ↩ Restore. Clicking it opens its page for review, with an Archived badge.
+  Archived bots are out of the all-bots History and don't count toward MAX_BOTS; a restore that would go over is
+  refused. A restore puts it back unpinned.
+- **Why:** the owner: "add archieve bot feature plz. not delete. so that i can review after."
+- **How:** `.archived` in the bot's folder holds the JST time (`ARCHIVE_MARK`, `Controller.archived`);
+  `App.archive()` / `App.unarchive()` (routes `/api/bots/<id>/archive|unarchive`); `list()` returns `bots` (active)
+  and `archived`; `start()` and `should_resume` refuse an archived bot. Page: `renderArchived()`, head actions.
+- **Tests:** test_web `test_archive_and_restore`, `test_archive_refuses_running_or_open_bet`; full suite (168) passes;
+  the page's script parses.
+
 ## [1.4.20] - 2026-11-18
 
 ### Recover over (wins) in the simulation panel
