@@ -96,6 +96,10 @@ FIELDS: dict[str, tuple] = {
     "cond_time_sec": (90, "int", None, "≤ s left",
                       "conditions mode: the Time left condition is true from this many seconds before the end, e.g. 90, "
                       "until the bot stops betting 5 s before the end."),
+    "cond_time_min_sec": (0, "int", None, "≥ s left",
+                          "conditions mode: the Time left condition is true only while at least this many seconds are "
+                          "left, so the bot stops entering then, e.g. ≤ 240 and ≥ 180 = only 60-120 s into a 5m round. "
+                          "0 (or empty) = no limit: until 5 s before the end."),
     "cond_move": ("and", "select", COND_OPS, "Move",
                   "conditions mode: off, AND or OR. True for Up while the coin's live price (Chainlink, what the round "
                   "settles on) is the ≥ $ from beat amount above the round's Price To Beat, for Down while it is that far "
@@ -284,6 +288,8 @@ class BotConfig:
                 raise ValueError("Conditions mode: turn on at least one condition (Time left, Move or Price)")
             if self.cond_time_sec < 10:
                 raise ValueError("Time left: ≤ s left must be at least 10 seconds")
+            if self.cond_time_min_sec < 0 or (self.cond_time_min_sec and self.cond_time_min_sec >= self.cond_time_sec):
+                raise ValueError("Time left: ≥ s left must be below ≤ s left (or empty for no limit)")
             if self.cond_move_usd <= 0:
                 raise ValueError("Move: ≥ $ from beat must be more than 0")
             if not (0 <= self.cond_price_min <= 0.99) or not (self.cond_price_max == 0 or 0.01 <= self.cond_price_max <= 0.99):

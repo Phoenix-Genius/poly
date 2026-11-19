@@ -4,6 +4,18 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.23] - 2026-11-19
+
+### Time left: a lower limit (≥ s left), an entry window for conditions mode
+- **What:** conditions mode's Time left gets a second box, ≥ s left (empty = no limit). Time left is then true only
+  between the two, so ≤ 240 and ≥ 180 bets only 60-120 s into a 5m round; after that the round is skipped. Shown in
+  the Bet mode tile, the Entry chip and the conditions text as "180-240s left". The simulation uses it too.
+- **Why:** the owner asked for an entry window. In the win-rate study, entries 60-120 s in (with a $20+ move) looked
+  best; later entries in the same bots were weaker, and conditions mode had no way to stop entering.
+- **How:** config `cond_time_min_sec` (0 = off, must be below `cond_time_sec`); strategy `time_floor`/`time_text`,
+  `sides_allowed` checks both limits, `entry_span` closes at max(5 s, the floor) before the end.
+- **Tests:** test_conditions `test_time_window_with_a_lower_limit`.
+
 ## [1.4.22] - 2026-11-19
 
 ### Stop after a win waits for the debt to clear

@@ -107,6 +107,19 @@ class SidesAllowedTest(unittest.TestCase):
         c = cfg(cond_time="and", cond_time_sec=60)
         self.assertEqual(sides_allowed(c, 50, None, {"up": 0.6, "down": 0.41})[0], ["down", "up"])
 
+    def test_time_window_with_a_lower_limit(self):
+        c = cfg(cond_time="and", cond_time_sec=240, cond_time_min_sec=180)    # only 60-120 s into a 5m round
+        prices = {"up": 0.6, "down": 0.41}
+        self.assertEqual(sides_allowed(c, 250, None, prices)[0], [])           # too early
+        self.assertEqual(sides_allowed(c, 200, None, prices)[0], ["down", "up"])
+        self.assertEqual(sides_allowed(c, 179, None, prices)[0], [])           # too late
+        self.assertIn("past the 180 s limit", sides_allowed(c, 179, None, prices)[1])
+        self.assertEqual(entry_span(c, 300), (60, 120))
+        self.assertEqual(conditions_text(c), "time 180-240s left")
+        self.assertEqual(entry_span(cfg(cond_time="and", cond_time_sec=90), 300), (210, 295))   # 0 = no limit
+        with self.assertRaises(ValueError):
+            cfg(cond_time="and", cond_time_sec=120, cond_time_min_sec=120, base_profit_usd=2.5).validate()
+
     def test_window_cap_and_plan_price(self):
         c = cfg(cond_time="and", cond_time_sec=90, cond_price="and", cond_price_max=0.95, hit_max_price=0.9)
         self.assertEqual(entry_span(c, 300), (210, 295))

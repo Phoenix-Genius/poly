@@ -57,9 +57,19 @@ def entry_span(cfg, length: float) -> tuple[float, float]:
         conds = cfg.conditions() if hasattr(cfg, "conditions") else {}
         ors_alone = getattr(cfg, "cond_join", "and") == "or" and "or" in conds.values()
         if getattr(cfg, "cond_time", "off") == "and" and not ors_alone:   # an OR alone may pass before Time left
-            return max(0.0, length - cfg.cond_time_sec), length - 5
+            return max(0.0, length - cfg.cond_time_sec), length - max(5, time_floor(cfg))
         return 0.0, length - 5
     return 0.0, entry_window(cfg.timeframe, cfg.entry_window_sec)
+
+
+def time_floor(cfg) -> int:
+    """conditions mode: Time left's ≥ s left (0 = no limit), the time left below which Time left is false."""
+    return int(getattr(cfg, "cond_time_min_sec", 0) or 0)
+
+
+def time_text(cfg) -> str:
+    low = time_floor(cfg)
+    return f"time {low}-{cfg.cond_time_sec}s left" if low else f"time <= {cfg.cond_time_sec}s"
 
 
 def buy_cap(cfg) -> float:
@@ -94,7 +104,7 @@ def conditions_text(cfg) -> str:
     """conditions mode in words, e.g. "time <= 90s AND move >= $10 AND price 0.75-0.95"."""
     parts = []
     for c, op in cfg.conditions().items():
-        what = {"time": f"time <= {cfg.cond_time_sec}s", "move": f"move >= ${cfg.cond_move_usd:g}",
+        what = {"time": time_text(cfg), "move": f"move >= ${cfg.cond_move_usd:g}",
                 "price": f"price {price_range_text(cfg)}"}[c]
         parts.append((op.upper(), what))
     ands = [w for op, w in parts if op == "AND"]
@@ -128,9 +138,11 @@ def sides_allowed(cfg, left: float, move: Optional[float], prices: dict) -> tupl
     why: dict[str, str] = {}
     conds = cfg.conditions()
     if "time" in conds:
-        ok = left <= cfg.cond_time_sec + 1e-9
+        low = time_floor(cfg)
+        ok = low - 1e-9 <= left <= cfg.cond_time_sec + 1e-9
         sets["time"] = both if ok else set()
-        why["time"] = f"{left:.0f} s left, waiting for {cfg.cond_time_sec} s"
+        why["time"] = f"{left:.0f} s left, past the {low} s limit" if left < low - 1e-9 else \
+            f"{left:.0f} s left, waiting for {cfg.cond_time_sec} s"
     if "move" in conds:
         if move is None:
             sets["move"], why["move"] = set(), "no live price / Price To Beat yet"

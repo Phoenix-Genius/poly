@@ -203,7 +203,7 @@
   .card-body .field.wide { grid-column: span 2; }
   .card-body.fit { grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); }   /* 4 or fewer settings shown: they fill the row */
   .card-body .field[data-key="price_spread"] { grid-column: 1 / -1; }
-  .card-body .field[data-key="cond_time"], .card-body .field[data-key="cond_price"] { grid-column-start: 1; }   /* conditions: Time + Move on a row, Price on the next */
+  .card-body .field[data-key="cond_time"], .card-body .field[data-key="cond_move"], .card-body .field[data-key="cond_price"] { grid-column-start: 1; }   /* conditions: one row each for Time, Move and Price */
   /* compact: 3+ settings a row; a long label wraps to a second line */
   .field label { display: block; font-weight: 600; font-size: 12px; line-height: 1.25; margin-bottom: 2px; cursor: help; }
   .field input, .field select { width: 100%; padding: 3px 6px; font-size: 13px; border: 1px solid var(--line); background: var(--input); }
@@ -783,19 +783,19 @@ $("#newDlg").addEventListener("close", async () => {
 
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
 const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply", bet_pct: "percent"};
-const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "cond_price_min", "cond_price_max"];   // shown empty when 0
+const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "cond_price_min", "cond_price_max", "cond_time_min_sec"];   // shown empty when 0
 const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
   {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "side_mode", "first_side",
-    "cond_time", "cond_time_sec", "cond_move", "cond_move_usd", "cond_price", "cond_price_min", "cond_price_max", "cond_join"]},   // conditions: one row per condition
+    "cond_time", "cond_time_sec", "cond_time_min_sec", "cond_move", "cond_move_usd", "cond_price", "cond_price_min", "cond_price_max", "cond_join"]},   // conditions: one row per condition
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "bet_pct", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
   {title: "Entry", icon: "⚙️", tone: "adv", keys: ["min_price", "max_price", "entry_window_sec", "poll_interval_sec", "result_wait"]},
 ];
 const WIDE = [];             // settings that take 2 columns (none: Market & money fits 3 a row in 2 rows)
 const PLACEHOLDER = {bot_name: "empty = random animal", budget_usd: "whole balance", stop_profit_usd: "off", target_steps: "off", max_steps: "no limit",
-  entry_window_sec: "auto", cond_price_min: "0.50", cond_price_max: "0.95"};
+  entry_window_sec: "auto", cond_time_min_sec: "no limit", cond_price_min: "0.50", cond_price_max: "0.95"};
 const SPREAD_HELP = "Slide to set Min and Max price around 0.50 in one go: ±5¢ = 0.45–0.55, ±10¢ = 0.40–0.60. " +
   "You can still set Min and Max one by one; the slider then says custom.";
 // the Price ± box: fills Min/Max price, and shows their spread when they're even around 0.50
@@ -899,7 +899,7 @@ function showFields() {
   $('.field[data-key="side_mode"]')?.classList.toggle("hide", !side);   // conditions: they pick, else the leader
   for (const k of ["min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
   // conditions: each condition's AND/OR box, and its values only while it's on
-  for (const [c, keys] of [["time", ["cond_time_sec"]], ["move", ["cond_move_usd"]], ["price", ["cond_price_min", "cond_price_max"]]]) {
+  for (const [c, keys] of [["time", ["cond_time_sec", "cond_time_min_sec"]], ["move", ["cond_move_usd"]], ["price", ["cond_price_min", "cond_price_max"]]]) {
     $(`.field[data-key="cond_${c}"]`)?.classList.toggle("hide", !conds);
     for (const k of keys) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !conds || v[`cond_${c}`] === "off");
   }
@@ -934,7 +934,7 @@ function renderSettingsHead(v) {
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
     leader: "leader", up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
   const conds = v.entry_mode === "conditions";
-  const win = conds ? (v.cond_time === "and" ? `≤ ${n(v.cond_time_sec)} s left` : "whole round") : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
+  const win = conds ? (v.cond_time === "and" ? (n(v.cond_time_min_sec) > 0 ? `${n(v.cond_time_min_sec)}–${n(v.cond_time_sec)} s left` : `≤ ${n(v.cond_time_sec)} s left`) : "whole round") : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
   $("#summary").innerHTML = `<div class="chips pairs">` + [
     v.network === "live" ? chip("💼", "Budget", n(v.budget_usd) > 0 ? money(n(v.budget_usd)) : "whole balance", "budget_usd")
       : chip("🧾", "Paper balance", money(n(v.paper_balance_usd)), "paper_balance_usd"),
@@ -1010,7 +1010,7 @@ function priceRange(lo, hi) {   // empty Price from = 0.50 (the favourite), empt
   return `${(lo > 0 ? lo : 0.5).toFixed(2)}–${(hi > 0 ? hi : 0.95).toFixed(2)}`;
 }
 function condText(v) {
-  const what = {time: `≤${+v.cond_time_sec}s left`, move: `move $${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
+  const what = {time: +v.cond_time_min_sec > 0 ? `${+v.cond_time_min_sec}–${+v.cond_time_sec}s left` : `≤${+v.cond_time_sec}s left`, move: `move $${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
   const on = ["time", "move", "price"].filter(c => v[`cond_${c}`] && v[`cond_${c}`] !== "off");
   const ands = on.filter(c => v[`cond_${c}`] === "and").map(c => what[c]), ors = on.filter(c => v[`cond_${c}`] === "or").map(c => what[c]);
   const or = ors.join(" OR ");
@@ -1020,7 +1020,7 @@ function condText(v) {
 }
 // the same, compact for the Bet mode tile: "≤120s · $1+ · 0.50–0.95" (· = AND, "or" between OR conditions)
 function condShort(v) {
-  const what = {time: `≤${+v.cond_time_sec}s`, move: `$${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
+  const what = {time: +v.cond_time_min_sec > 0 ? `${+v.cond_time_min_sec}–${+v.cond_time_sec}s` : `≤${+v.cond_time_sec}s`, move: `$${+v.cond_move_usd}+`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
   const on = ["time", "move", "price"].filter(c => v[`cond_${c}`] && v[`cond_${c}`] !== "off");
   const ands = on.filter(c => v[`cond_${c}`] === "and").map(c => what[c]);
   const ors = on.filter(c => v[`cond_${c}`] === "or").map(c => what[c]).join(" or ");
