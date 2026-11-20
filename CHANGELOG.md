@@ -4,6 +4,17 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.30] - 2026-11-20
+
+### 🎲 Bet in: how many rounds the bot bet
+- **What:** the Wins / Losses tile has a new row under Held: **🎲 Bet in** `rounds/bets rounds - %`, e.g.
+  `165/147 rounds - 89%`. Also added the missing `daily` length (86400 s) to the page's `ROUND_SEC`.
+- **Why:** the owner wants to see how often the bot takes part in a round.
+- **How:** `betInRounds()` in `static/index.html`, page only. Rounds = round starts from `held_since` to now
+  (the round running at `held_since` counts), using the bot's round length. Bets = wins + losses since Reset,
+  plus the open bet. Rounds is never less than bets. Stopped time counts as rounds too.
+- **Tests:** the 180 unit tests pass; page script checked with `node --check`.
+
 ## [1.4.29] - 2026-11-20
 
 ### 📊 Trend side modes

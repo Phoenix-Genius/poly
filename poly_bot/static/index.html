@@ -694,6 +694,14 @@ async function loadBots() {
 // fits = how many steps the budget reaches in this streak (lost ones included). One pip per reachable step:
 // lost = amber, the current one = red. A step past the budget gets no pip; the bar just ends full.
 // how long the bot has held since its first Start after the last Reset: "2d 7h", "5h 12m", "14m"
+// Wins / Losses tile: "rounds / bets rounds - %" since the held time started (rounds = round starts since then)
+function betInRounds(s) {
+  const sec = ROUND_SEC[s.settings.timeframe], now = Date.now() / 1000;
+  if (!s.held_since || !sec) return "–";
+  const bets = (s.wins || 0) + (s.losses || 0) + (s.bet ? 1 : 0);
+  const rounds = Math.max(bets, Math.floor(now / sec) - Math.floor(s.held_since / sec) + 1);
+  return `${rounds}/${bets} <small>rounds</small> - ${Math.round(bets / rounds * 100)}%`;
+}
 function heldFor(since) {
   if (!since) return "";
   const m = Math.max(0, Math.floor((Date.now() / 1000 - since) / 60)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60);
@@ -1391,6 +1399,7 @@ function render() {
       <div class="tile money-tile" style="--tone:var(--accent)"><div class="mt-top"><div class="mt-part" data-chart="budget"><div class="k" title="Click: the chart over time · ${budgetOf(s) > 0 ? "This bot's own money: Budget + profit since Reset, with the open bet at what it's worth now" : "The account's cash plus this bot's open bet at what it's worth now"}">💰 ${budgetOf(s) > 0 ? "Budget balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${!(budgetOf(s) > 0) && s.bet && s.wallet != null ? `<div class="muted" style="font-size:11px">cash ${money(s.wallet)} · in bet ${money(s.balance - s.wallet)}</div>` : ""}${budgetOf(s) > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>${budgetOf(s) > 0 ? `<div class="mt-part mt-right" ${s.network === "live" ? 'data-chart="account"' : ""}><div class="k" title="${s.network === "live" ? "Click: the chart over time · " : ""}The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}</div><div class="wl-stats"><span>📊 Profit since Reset</span><b class="${tone(s.pnl)}">${money(s.pnl, true)}</b><span>🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</span><b>${!(s.settings.stop_profit_usd > 0) ? '<small>off</small>' : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small>to go</small>' : '<span class="pos">✅ reached</span>'}</b></div><div class="mt-step"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div></div>
       <div class="tile wide"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}<div class="wl-stats" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped. Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset; a cycle a ladder end cut off doesn't count">
         <span>⏱ Held</span><b>${s.held_since ? heldFor(s.held_since) : "–"}</b>
+        <span title="Rounds since the bot was first started after the last Reset / bets it placed in them (open bet included)">🎲 Bet in</span><b>${betInRounds(s)}</b>
         <span>💥 Ladder ends</span><b class="${s.ladder_ends ? "neg" : "pos"}">${s.ladder_ends || 0}</b>
         <span>🪜 Longest ladder</span><b>${s.longest || 0} <small>bets</small>${s.cycle_bets ? ` <small class="now">now ${s.cycle_bets}</small>` : ""}</b></div></div>
       <div class="tile wide blur-tile ${modeShown ? "shown" : ""}" id="modeTile" style="--tone:var(--accent)" title="Hover (or tap) to show the bet mode"><div class="k">🧭 Bet mode</div><div class="v">${s.settings.entry_mode === "conditions" ? "Conditions" : "Side"}</div>${modeRows(s.settings, s.trend)}</div>
@@ -1672,7 +1681,7 @@ function renderLadder() {
 // the bets, newest first, with Resets and settings changes in between (by time)
 // JST, 24-hour: "2026-11-18 00:35:32" from unix seconds (slice it for less)
 const jstFull = ts => new Date((ts + 9 * 3600) * 1000).toISOString().slice(0, 19).replace("T", " ");
-const ROUND_SEC = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400};
+const ROUND_SEC = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "daily": 86400};
 // a round in JST, 24-hour, from its slug ("btc-updown-5m-<start>"): "11-14 00:15-00:20" (Polymarket's own
 // US-Eastern title is the tooltip); without such a slug, the title shortened: "Nov 13 10:15-10:20AM"
 function shortRound(title, slug) {
