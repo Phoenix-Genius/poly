@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.26] - 2026-11-20
+
+### Held time, ladder ends and longest ladder: in the Wins / Losses tile only
+- **What:** the three numbers moved into the **✅ Wins / ❌ Losses** tile on the bot page,
+  under a thin line, one per row: label on the left, the number in bold on the right (ladder ends red, or green at 0;
+  "now N" of the open cycle in amber). The separate tile and the bot list card's line are gone.
+- **Why:** the owner: "show on this card on main part. not on bet list card."
+- **How:** index.html only; the status and bot list still send the numbers.
+
 ## [1.4.25] - 2026-11-20
 
 ### Held time, ladder ends and longest ladder on the bot page and cards

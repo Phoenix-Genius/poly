@@ -141,7 +141,14 @@
   .bi-steps .steps { flex: 1; min-width: 0; margin: 0; }
   .bi-steps .steps i { height: 4px; max-width: 16px; }
   .bi-steps b { color: var(--text); font-weight: 650; }
-  .bi-steps .bi-held b.neg { color: var(--red); }
+  /* Wins / Losses tile: held time, ladder ends, longest ladder, one per row (label left, number right) */
+  .wl-stats { display: grid; grid-template-columns: auto auto; justify-content: space-between; gap: 2px 12px; margin-top: 6px;
+              padding-top: 5px; border-top: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .wl-stats > span { color: var(--muted); white-space: nowrap; }
+  .wl-stats > b { text-align: right; font-weight: 700; color: var(--text); white-space: nowrap; }
+  .wl-stats > b.neg { color: var(--red); } .wl-stats > b.pos { color: var(--green); }
+  .wl-stats small { font-weight: 400; color: var(--muted); font-size: 11px; }
+  .wl-stats small.now { color: var(--amber); font-weight: 600; }
   .bi-side { color: #f97316; font-size: 12px; }
   .bi-side.up { color: #3b82f6; }   /* Up / long blue, Down / short orange: not green / red, which mean win / loss */
   /* History / simulation Bet (Side) column: just an arrow, Up / long blue, Down / short orange (green / red = win / loss) */
@@ -700,7 +707,7 @@ function renderBots() {
         <span class="chip ${b.network === "live" ? "live" : "paper"}">${b.network === "live" ? "LIVE" : "paper"}</span>${act}</div>
       <div class="bi-money"><span class="bal" title="${b.budget ? "This bot's budget balance" : b.network === "live" ? "pUSD balance" : "Paper balance"}">${money(b.balance)}</span>
         <span class="pnl ${tone(b.pnl)}" title="Profit since Reset">${money(b.pnl, true)}</span><span class="wl">${b.wins || 0}W ${b.losses || 0}L</span></div>
-      <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span>${b.held_since ? `<span class="bi-held" title="Held ${heldFor(b.held_since)} since Reset · longest ladder ${b.longest || 0} bets · ${b.ladder_ends || 0} ladder end${b.ladder_ends === 1 ? "" : "s"}">⏱${heldFor(b.held_since)}${b.longest ? ` · 🪜${b.longest}` : ""}${b.ladder_ends ? ` · <b class="neg">💥${b.ladder_ends}</b>` : ""}</span>` : ""}<span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
+      <div class="bi-steps"><span class="steps">${stepPips(b.step, b.fits)}</span><span>step <b>${b.fits != null && b.step > b.fits ? `${b.fits}/${b.fits}` : b.step}</b> · ${next}</span></div>
     </div>`;
   };
   $("#groupBtn").setAttribute("aria-pressed", String(groupOn));
@@ -1145,8 +1152,10 @@ function render() {
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
-      <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}</div>
-      <div class="tile" style="--tone:var(--red)"><div class="k" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped">⏱ Held · 💥 Ladder ends</div><div class="v num">${s.held_since ? heldFor(s.held_since) : "–"} · <span class="${s.ladder_ends ? "neg" : ""}">${s.ladder_ends || 0}</span></div><div class="muted" style="font-size:11px" title="Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset. A cycle a ladder end cut off doesn't count">🪜 longest <b>${s.longest || 0}</b> bets${s.cycle_bets ? ` · now ${s.cycle_bets}` : ""}${s.held_since ? ` · since ${esc(jstFull(s.held_since).slice(0, 16))}` : ""}</div></div>
+      <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}<div class="wl-stats" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped. Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset; a cycle a ladder end cut off doesn't count">
+        <span>⏱ Held</span><b>${s.held_since ? heldFor(s.held_since) : "–"}</b>
+        <span>💥 Ladder ends</span><b class="${s.ladder_ends ? "neg" : "pos"}">${s.ladder_ends || 0}</b>
+        <span>🪜 Longest ladder</span><b>${s.longest || 0} <small>bets</small>${s.cycle_bets ? ` <small class="now">now ${s.cycle_bets}</small>` : ""}</b></div></div>
       <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div>${presetsOf(s.settings).length ? `<div class="muted" style="font-size:11px" title="This bot's settings are the same as this preset's (📚 Presets)">📄 Preset <b>${esc(presetsOf(s.settings).join(", "))}</b></div>` : ""}</div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
