@@ -433,7 +433,8 @@ class Controller:
                # the market's price of the bet's side now = its win chance (the bot polls it every 2-5 s)
                "bet_chance": self.bet_chance(),
                "locked": self.locked_elsewhere, "wins": b.ladder.wins, "losses": b.ladder.losses,
-               "budget": self.cfg.budget > 0, "archived": self.archived}
+               "budget": self.cfg.budget > 0, "archived": self.archived,
+               "held_since": b.ladder.since or None, "ladder_ends": b.ladder.ends, "longest": b.ladder.longest}
         if full:
             phase, message = self._phase()
             bal = self.balance()
@@ -486,6 +487,8 @@ class Controller:
             "budget_left": round(b.budget_left(), 2) if bal is not None else None,
             "until_earn_left": round(b.until_earn_left(), 2),
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
+            "held_since": b.ladder.since or None, "ladder_ends": b.ladder.ends,
+            "longest": b.ladder.longest, "cycle_bets": b.ladder.cyc_bets,
             "all_wins": (aw := sum(1 for t in trades if t.get("side") == t.get("result"))),
             "all_losses": len(trades) - aw,                 # every bet in History, Resets or not
             "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,

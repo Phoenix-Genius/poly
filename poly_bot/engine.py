@@ -79,12 +79,50 @@ class Bot:
             self.log.warning("state file unreadable, starting a fresh ladder")
             return
         self.ladder = Ladder.from_dict(d.get("ladder") or {})
+        if "longest" not in (d.get("ladder") or {}):     # saved before v1.4.25: work these out from the files
+            held = self._held_from_files()
+            if "since" not in (d.get("ladder") or {}):
+                self.ladder.since, self.ladder.ends = held[0], held[1]
+            self.ladder.longest, self.ladder.cyc_bets = held[2], held[3]
         self.bet = d.get("bet")
         self.pending = d.get("pending") or {}
         self.done_round = d.get("done_round", "")
         self.halted = d.get("halted", "")
         self.halt_message = d.get("halt_message", "")
         self.stop_after_win = bool(d.get("stop_after_win"))
+
+    def _held_from_files(self) -> tuple[float, int, int, int]:
+        """(since, ladder ends, longest cycle, open cycle's bets) for a state saved before they were kept: since =
+        the last Reset (Reset paper too on paper), else the first bet in this network's History; ends = the ladder
+        ends logged after it; the cycles counted from History's bets since then like its *N marks (Recover over N:
+        the N-th win in a row since the last loss ends a cycle; a ladder end closes one without counting it)."""
+        from .charts import jst_unix
+        from .trades import read_events, read_trades
+        try:
+            events = read_events(self.cfg.folder)
+            resets = [e["time"] for e in events if (e.get("kind") == "reset" and str(e.get("text", "")).startswith("Reset:"))
+                      or (e.get("kind") == "paper_reset" and self.cfg.network == "paper")]
+            first = next((t.get("placed") or t.get("time") for t in read_trades(self.cfg.trade_log)[:1]), "")
+            start = resets[-1] if resets else first
+            ends_at = [e["time"] for e in events if e.get("kind") == "ladder_end" and e.get("time", "") > (start or "")]
+            n, longest, bets, left, k = max(1, int(self.cfg.recover_wins or 1)), 0, 0, 0, 0
+            for t in read_trades(self.cfg.trade_log):
+                if (t.get("placed") or t.get("time", "")) < (start or "") or t.get("result") not in ("up", "down"):
+                    continue
+                while k < len(ends_at) and ends_at[k] < t.get("time", ""):    # a ladder end before this bet settled
+                    bets, left, k = 0, 0, k + 1
+                if t.get("side") != t.get("result"):
+                    bets, left = bets + 1, 0
+                elif bets:
+                    bets += 1
+                    left = (left or n) - 1
+                    if left <= 0:
+                        longest, bets, left = max(longest, bets), 0, 0
+            if k < len(ends_at):                      # a ladder end after the last bet closed its cycle
+                bets = 0
+            return float(jst_unix(start) or 0.0) if start else 0.0, len(ends_at), longest, bets
+        except (OSError, ValueError, KeyError):
+            return 0.0, 0, 0, 0
 
     def save(self) -> None:
         write_json(self.state_path, {"ladder": self.ladder.to_dict(), "bet": self.bet, "done_round": self.done_round,
@@ -102,7 +140,7 @@ class Bot:
         if keep_counts:
             self.ladder.restart()
         else:
-            self.ladder = Ladder()
+            self.ladder = Ladder()                   # held time starts again with the next Start
         self.done_round, self.halted, self.halt_message = "", "", ""
         self.stop_after_win = False
         self.save()
@@ -116,6 +154,8 @@ class Bot:
                              f"${self.cfg.stop_profit_usd:.2f}. Press Reset to start counting again, or raise "
                              f"Until earn.")
         self.halted, self.halt_message, self.stop_after_win = "", "", False
+        if not self.ladder.since:                     # the first Start after a Reset: held time counts from now
+            self.ladder.since = self.clock()
         self.save()
 
     def waits_at_step1(self) -> bool:
@@ -223,9 +263,11 @@ class Bot:
             self._event("ladder_end", f"Ladder ended at step {self.ladder.step}: {why} Reset by itself: the streak's "
                                       f"${self.ladder.streak_lost:,.2f} loss is accepted, back to step 1.")
             self.ladder.restart()
+            self.ladder.ends += 1
             self.save()
             return
         if self.halted != "ladder":
+            self.ladder.ends += 1
             self._event("ladder_end", f"Ladder ended at step {self.ladder.step}: {why} The bot stopped "
                                       f"(streak lost ${self.ladder.streak_lost:,.2f}); press Reset.")
         self._halt("ladder", f"Ladder ended at step {self.ladder.step}: {why}")
@@ -603,6 +645,8 @@ class Bot:
             except Exception as e:  # noqa: BLE001 - only for the page: never stops a placed bet being saved
                 self.log.debug("coin price at bet: %s", e)
         self.ladder.rounds_bet += 1
+        if not self.ladder.since:
+            self.ladder.since = self.clock()
         self.done_round = cur.slug
         self._said = ""
         self._next_settle_check = 0.0

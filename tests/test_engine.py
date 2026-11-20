@@ -7,6 +7,7 @@ from pathlib import Path
 from poly_bot.config import BotConfig
 from poly_bot.engine import Bot
 from poly_bot.paper import PaperClient
+from poly_bot.charts import jst_unix
 from poly_bot.trades import read_events, read_trades
 from tests.fakes import Clock, FakePM
 
@@ -314,6 +315,58 @@ class EngineTest(unittest.TestCase):
         ev = read_events(bot.cfg.folder)
         self.assertEqual([e["kind"] for e in ev], ["ladder_end"])
         self.assertIn("Reset by itself", ev[0]["text"])
+
+    def test_held_time_and_ladder_ends(self):
+        bot = self.make(max_steps=2, on_ladder_end="reset")
+        self.assertEqual((bot.ladder.since, bot.ladder.ends), (0.0, 0))
+        start = self.clock.t
+        bot.on_start()                                # held time counts from the first Start
+        self.assertEqual(bot.ladder.since, start)
+        self.play(bot, "down")
+        self.play(bot, "down")                        # 2 losses = Max losses in a row: ends by itself
+        self.assertEqual(bot.ladder.ends, 1)
+        bot.on_start()                                # a later Start keeps the held time
+        self.assertEqual(bot.ladder.since, start)
+        bot.reset(keep_counts=True)                   # Reset only ladder keeps both
+        self.assertEqual((bot.ladder.since, bot.ladder.ends), (start, 1))
+        again = Bot(bot.cfg, bot.client, self.pm, clock=self.clock)   # kept in the state file
+        self.assertEqual((again.ladder.since, again.ladder.ends), (start, 1))
+        bot.reset()                                   # a full Reset starts both again
+        self.assertEqual((bot.ladder.since, bot.ladder.ends), (0.0, 0))
+        self.clock.t += 600
+        bot.on_start()
+        self.assertEqual(bot.ladder.since, self.clock.t)
+
+    def test_longest_ladder(self):
+        bot = self.make(recover_wins=2)
+        for r in ("down", "down", "up", "down", "up", "up"):   # L L W L W W: one cycle of 6 bets, cleared
+            self.play(bot, r)
+        self.assertEqual((bot.ladder.longest, bot.ladder.cyc_bets), (6, 0))
+        self.play(bot, "up")                          # a win with nothing owed: no cycle
+        self.play(bot, "down")
+        self.play(bot, "up")
+        self.assertEqual((bot.ladder.longest, bot.ladder.cyc_bets), (6, 2))   # 2 bets in, half still owed
+        bot.reset(keep_counts=True)                   # an ended ladder: that cycle doesn't count
+        self.assertEqual((bot.ladder.longest, bot.ladder.cyc_bets), (6, 0))
+        bot.reset()
+        self.assertEqual(bot.ladder.longest, 0)
+
+    def test_held_time_backfilled_from_files(self):
+        bot = self.make(max_steps=2, on_ladder_end="reset")
+        self.play(bot, "down")
+        self.play(bot, "down")                        # a ladder end in History
+        first = read_trades(bot.cfg.trade_log)[0]["placed"]
+        state = json.loads(bot.cfg.state_file.read_text())
+        for k in ("since", "ends", "longest", "cyc_bets"):
+            del state["ladder"][k]                    # as saved before v1.4.25
+        bot.cfg.state_file.write_text(json.dumps(state))
+        ev = bot.cfg.folder / "events.jsonl"         # events carry the wall clock's time: put them after the first bet
+        ev.write_text("".join(json.dumps({**e, "time": read_trades(bot.cfg.trade_log)[-1]["time"]}) + "\n"
+                              for e in read_events(bot.cfg.folder)))
+        old = Bot(bot.cfg, bot.client, self.pm, clock=self.clock)
+        self.assertEqual(old.ladder.since, jst_unix(first))
+        self.assertEqual(old.ladder.ends, 1)
+        self.assertEqual((old.ladder.longest, old.ladder.cyc_bets), (0, 0))   # the cycle ended, never cleared
 
     def test_steps_to_survive_is_side_mode_only(self):
         bot = self.make(entry_mode="hit", hit_price=0.75, target_steps=5, on_ladder_end="stop")

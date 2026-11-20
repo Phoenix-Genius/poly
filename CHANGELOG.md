@@ -4,6 +4,25 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.25] - 2026-11-20
+
+### Held time, ladder ends and longest ladder on the bot page and cards
+- **What:** a **⏱ Held · 💥 Ladder ends** tile on the bot page (with "since <date>"), and the same on each bot card in
+  the list (⏱2d 7h · 💥8). Held = how long since the first Start after the last Reset; ladder ends = how often since
+  then a bet couldn't be paid (the streak's loss was taken, or the bot stopped).
+  Under it: **🪜 longest N bets** = the most bets in one recovery cycle (first loss until the win that clears the debt,
+  History's *N) the bot came through since Reset, and "now N" for the open cycle; the card shows 🪜N too.
+- **Why:** the owner: "show bot held time (from reset or start) and show ladder ended counts on the status card",
+  "and longest alive rec2 length".
+- **How:** `Ladder.since` / `Ladder.ends` in the state file. A full Reset (and Reset paper) clears both; Reset only
+  ladder keeps them. `since` is set at the first Start (or first bet) after a Reset; `_ladder_end` counts once per end.
+  States saved before this get both from the files once: since = the last Reset event (Reset paper on paper), else
+  the first bet in History; ends = the ladder_end events after it. Sent as `held_since` / `ladder_ends` in the status
+  and the bot list. `Ladder.cyc_bets` / `Ladder.longest`: a loss opens a cycle, the win that clears the debt closes it
+  and may set the longest; a ladder end (`restart`) drops the open cycle uncounted. Old states count them from
+  History's bets after `since` with History's *N rule (the current Recover over N), a ladder end closing a cycle.
+- **Tests:** `test_held_time_and_ladder_ends`, `test_held_time_backfilled_from_files`, `test_longest_ladder`.
+
 ## [1.4.24] - 2026-11-19
 
 ### Bot list: group bots by name

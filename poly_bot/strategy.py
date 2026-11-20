@@ -207,6 +207,10 @@ class Ladder:
     base: float = 0.0              # Steps to survive: this streak's Profit per win / Starting bet (0 = settings')
     wins_left: int = 0             # Recover over N wins: wins still needed to clear streak_lost (0 = N)
     forgiven: float = 0.0          # the small leftover the last win forgave (0 = none), for the log
+    since: float = 0.0             # unix time the bot was started after the last Reset (0 = not yet): "held" time
+    ends: int = 0                  # ladder ends since the last Reset (stopped or reset by itself)
+    cyc_bets: int = 0              # bets in the recovery cycle now open (a loss starts it, the win that clears it ends it)
+    longest: int = 0               # the most bets in one cycle the bot came through since the last Reset (History's *N)
 
     def record(self, side: str, won: bool, profit: float, recover_wins: int = 1,
                base_profit: Optional[float] = None) -> None:
@@ -215,6 +219,14 @@ class Ladder:
         writing it off. None (multiply sizing): a win clears the streak, as before.
         The N-th win in a row always ends the cycle: whatever is still owed then (a dearer fill or fee) is forgiven
         instead of keeping the cycle open (a later loss would otherwise pile onto it); the owner's rule since v1.4.11."""
+        owed = self.streak_lost > 0
+        self._record(side, won, profit, recover_wins, base_profit)
+        if not won or owed or self.cyc_bets:          # a cycle's bet; a win with nothing owed is none
+            self.cyc_bets += 1
+            if won and self.streak_lost <= 0:         # cleared: the cycle came through
+                self.longest, self.cyc_bets = max(self.longest, self.cyc_bets), 0
+
+    def _record(self, side: str, won: bool, profit: float, recover_wins: int, base_profit: Optional[float]) -> None:
         self.pnl += profit
         self.forgiven = 0.0
         self.last_side, self.last_won = side, won
@@ -247,6 +259,7 @@ class Ladder:
     def restart(self) -> None:
         """Accept the streak's loss and start again at step 1 (pnl and counts stay)."""
         self.step, self.streak_lost, self.base, self.wins_left = 1, 0.0, 0.0, 0
+        self.cyc_bets = 0                             # the cycle didn't come through: not a longest
 
     def to_dict(self) -> dict:
         return asdict(self)
