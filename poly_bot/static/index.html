@@ -264,11 +264,17 @@
   .status { flex-basis: 100%; color: var(--muted); }
   .status.halt { color: var(--red); }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
-  .tile { background: var(--section-bg); padding: 8px 10px; border-left: 3px solid var(--tone, var(--line)); }
+  .tiles { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .tile { flex: 1 1 140px; min-width: 0; background: var(--section-bg); padding: 8px 10px; border-left: 3px solid var(--tone, var(--line)); }
   .tile .k { font-size: 12px; color: var(--muted); }
   .tile .v { font-size: 18px; font-weight: 700; }
-  .tile.wide { grid-column: span 2; min-width: 0; }   /* tiles with rows of text: two columns wide so nothing is cut */
+  .tile.wide { flex: 1.25 1 240px; }
+  /* the money tile: Budget balance and Account portfolio side by side, then Profit / Until earn rows, then the step */
+  .tile.money-tile { flex: 2.2 1 320px; }
+  .mt-top { display: flex; justify-content: space-between; gap: 12px; }
+  .mt-part { min-width: 0; } .mt-right { text-align: right; }
+  .mt-part[data-chart] { cursor: pointer; border-radius: 3px; } .mt-part[data-chart]:hover { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .mt-step { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line); }   /* tiles with rows of text: a bit wider (not double) so nothing is cut */
   .steps { display: flex; gap: 2px; margin-top: 4px; }
   .steps i { flex: 1; height: 6px; background: var(--line); }
   .steps i.on { background: var(--amber); } .steps i.now { background: var(--red); }
@@ -1105,11 +1111,29 @@ function condShort(v) {
 }
 // the Bet mode tile: which mode and its main setting, e.g. "Conditions ≤90s left AND 0.75–0.95", "Side · random"
 // the Bet mode tile's last line: how bets are sized, e.g. "recover over 2 wins · $2/win", "multiply ×2.2 from $3"
-function sizingLine(v) {
+// the bot page's Bet mode tile: one setting per row, label left, value right (like the Wins / Losses tile's rows)
+function modeRows(v) {
+  const rows = [], row = (k, val, title = "") => rows.push(`<span${title ? ` title="${esc(title)}"` : ""}>${k}</span><b>${val}</b>`);
+  const side = esc(String(v.side_mode).replace(/_/g, " "));
+  if (v.entry_mode === "conditions") {
+    const what = {time: +v.cond_time_min_sec > 0 ? `${+v.cond_time_min_sec}–${+v.cond_time_sec}s left` : `≤${+v.cond_time_sec}s left`,
+                  move: `≥ ${money(+v.cond_move_usd)}`, price: priceRange(+v.cond_price_min, +v.cond_price_max)};
+    const label = {time: "⏱ Time", move: "📈 Move", price: "💲 Price"};
+    for (const c of ["time", "move", "price"]) {
+      const op = v[`cond_${c}`];
+      if (op && op !== "off") row(label[c], `${esc(what[c])} <small>${op.toUpperCase()}</small>`, condText(v));
+    }
+    row("🎲 Side", side);
+  } else {
+    row("🎲 Side", side);
+    row("💲 Price", `${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`);
+  }
   const n = +v.recover_wins || 1;
-  if (v.sizing === "percent") return +v.bet_pct >= 100 ? "all-in: the whole budget each bet" : `<b>${+v.bet_pct}%</b> of the budget each bet`;
-  return v.sizing === "multiply" ? `multiply ×${+v.multiplier} from ${money(v.start_usd)}`
-    : `recover over <b>${n}</b> win${n === 1 ? "" : "s"} · ${money(v.base_profit_usd)}/win`;
+  if (v.sizing === "percent") row("💵 Bet size", +v.bet_pct >= 100 ? "all-in" : `${+v.bet_pct}% <small>of budget</small>`);
+  else if (v.sizing === "multiply") row("💵 Sizing", `×${+v.multiplier} <small>from</small> ${money(v.start_usd)}`);
+  else { row("🔁 Recover over", `${n} <small>win${n === 1 ? "" : "s"}</small>`); row("💵 Profit per win", money(v.base_profit_usd)); }
+  if (presetsOf(v).length) row("📄 Preset", esc(presetsOf(v).join(", ")), "This bot's settings are the same as this preset's (📚 Presets)");
+  return `<div class="wl-stats">${rows.join("")}</div>`;
 }
 function modeTile(v) {
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
@@ -1148,16 +1172,12 @@ function render() {
       <div class="status ${s.phase === "halted" ? "halt" : ""}">${running ? "● " : ""}${esc(s.message)}${s.next_in && !s.bet ? ` · next round in ${esc(s.next_in)}` : ""}${s.stop_after_win ? ' · <b>🏁 stops after the win that clears the debt</b>' : ""}</div>
     </div>
     <div class="tiles">
-      <div class="tile" data-chart="budget" style="--tone:var(--accent)"><div class="k" title="Click: the chart over time · ${budgetOf(s) > 0 ? "This bot's own money: Budget + profit since Reset, with the open bet at what it's worth now" : "The account's cash plus this bot's open bet at what it's worth now"}">💰 ${budgetOf(s) > 0 ? "Budget balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${!(budgetOf(s) > 0) && s.bet && s.wallet != null ? `<div class="muted" style="font-size:11px">cash ${money(s.wallet)} · in bet ${money(s.balance - s.wallet)}</div>` : ""}${budgetOf(s) > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>
-      ${budgetOf(s) > 0 ? `<div class="tile" ${s.network === "live" ? 'data-chart="account"' : ""} style="--tone:var(--muted)"><div class="k" title="${s.network === "live" ? "Click: the chart over time · " : ""}The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}
-      <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
-      <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
-      <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
+      <div class="tile money-tile" style="--tone:var(--accent)"><div class="mt-top"><div class="mt-part" data-chart="budget"><div class="k" title="Click: the chart over time · ${budgetOf(s) > 0 ? "This bot's own money: Budget + profit since Reset, with the open bet at what it's worth now" : "The account's cash plus this bot's open bet at what it's worth now"}">💰 ${budgetOf(s) > 0 ? "Budget balance" : "Balance"}${s.unclaimed ? " · " + money(s.unclaimed) + " to claim" : ""}</div><div class="v num">${money(s.balance)}</div>${!(budgetOf(s) > 0) && s.bet && s.wallet != null ? `<div class="muted" style="font-size:11px">cash ${money(s.wallet)} · in bet ${money(s.balance - s.wallet)}</div>` : ""}${budgetOf(s) > 0 && s.wallet != null && s.wallet + 0.005 < s.balance ? `<div class="neg" style="font-size:11px">the account has only ${money(s.wallet)}</div>` : ""}</div>${budgetOf(s) > 0 ? `<div class="mt-part mt-right" ${s.network === "live" ? 'data-chart="account"' : ""}><div class="k" title="${s.network === "live" ? "Click: the chart over time · " : ""}The whole Polymarket account, like Polymarket's Portfolio: cash plus what the open bets (of every bot on it) and unclaimed wins are worth now">🏦 ${s.network === "live" ? "Account portfolio" : "Paper portfolio"}</div><div class="v num">${s.portfolio ? money(s.portfolio.total) : s.wallet == null ? "–" : money(s.wallet)}</div>${s.portfolio ? `<div class="muted" style="font-size:11px">cash ${money(s.portfolio.cash)}${s.portfolio.positions > 0.005 ? ` · in bets ${money(s.portfolio.positions)}` : ""}</div>` : ""}</div>` : ""}</div><div class="wl-stats"><span>📊 Profit since Reset</span><b class="${tone(s.pnl)}">${money(s.pnl, true)}</b><span>🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</span><b>${!(s.settings.stop_profit_usd > 0) ? '<small>off</small>' : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small>to go</small>' : '<span class="pos">✅ reached</span>'}</b></div><div class="mt-step"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div></div>
       <div class="tile wide"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}<div class="wl-stats" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped. Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset; a cycle a ladder end cut off doesn't count">
         <span>⏱ Held</span><b>${s.held_since ? heldFor(s.held_since) : "–"}</b>
         <span>💥 Ladder ends</span><b class="${s.ladder_ends ? "neg" : "pos"}">${s.ladder_ends || 0}</b>
         <span>🪜 Longest ladder</span><b>${s.longest || 0} <small>bets</small>${s.cycle_bets ? ` <small class="now">now ${s.cycle_bets}</small>` : ""}</b></div></div>
-      <div class="tile wide" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div>${presetsOf(s.settings).length ? `<div class="muted" style="font-size:11px" title="This bot's settings are the same as this preset's (📚 Presets)">📄 Preset <b>${esc(presetsOf(s.settings).join(", "))}</b></div>` : ""}</div>
+      <div class="tile wide" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${s.settings.entry_mode === "conditions" ? "Conditions" : "Side"}</div>${modeRows(s.settings)}</div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}

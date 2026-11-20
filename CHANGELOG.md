@@ -4,6 +4,26 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.28] - 2026-11-20
+
+### Balance, Account portfolio, Profit, Until earn and Step in one tile
+- **What:** one money tile: 💰 Budget balance on the left and 🏦 Account portfolio on the right at the top, then the
+  📊 Profit since Reset and 🎯 Until earn rows, then the 🪜 step line and its bar. The separate Account portfolio,
+  Profit, Until earn and Step tiles are gone.
+- **Why:** the owner: "plz merge these 3 cards into one card", then "plz merge like this" (portfolio and step too).
+- **How:** index.html: `.money-tile` (flex 2.2); the balance and the portfolio each still open their own chart on a
+  click. The rows use the Wins / Losses tile's style; the row tiles' minimum width is 240 px so no label is cut.
+
+### Bet mode tile: one setting per row
+- **What:** the bot page's 🧭 Bet mode tile shows "Side" or "Conditions" big, then one setting per row, label left and
+  value bold on the right: Side, Price (side mode) or each Time / Move / Price condition with AND/OR (conditions mode),
+  Recover over / Profit per win (or the multiply / percent sizing), and the Preset.
+- **Why:** the owner: "bet mode . show content one by a row plz."
+- **How:** index.html: `modeRows()` with the Wins / Losses tile's row style (`.wl-stats`); the unused `sizingLine()`
+  removed. The all-bots History table keeps its one-line `modeTile()`.
+- **Also:** the tiles are a wrapping flex row instead of a grid; Wins / Losses and Bet mode are only a little wider than
+  the others (`flex: 1.25`), not two columns as in 1.4.27, which was too wide on a big screen (owner: "too wide card").
+
 ## [1.4.27] - 2026-11-20
 
 ### Wins / Losses and Bet mode tiles: two columns wide
