@@ -4,6 +4,15 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.27] - 2026-11-20
+
+### Wins / Losses and Bet mode tiles: two columns wide
+- **What:** both tiles are two grid columns wide, so the Held / Ladder ends / Longest ladder rows and the bet mode
+  ("random · 0.45–0.55") fit without being cut or broken in the middle.
+- **Why:** the owner: "plz fix this. and also bet mode as well." (numbers cut off at the tile's edge).
+- **How:** index.html: `.tile.wide { grid-column: span 2 }`; the rows' labels shrink (…) before a number is cut;
+  the price range doesn't wrap.
+
 ## [1.4.26] - 2026-11-20
 
 ### Held time, ladder ends and longest ladder: in the Wins / Losses tile only

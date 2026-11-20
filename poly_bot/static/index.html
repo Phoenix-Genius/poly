@@ -142,9 +142,9 @@
   .bi-steps .steps i { height: 4px; max-width: 16px; }
   .bi-steps b { color: var(--text); font-weight: 650; }
   /* Wins / Losses tile: held time, ladder ends, longest ladder, one per row (label left, number right) */
-  .wl-stats { display: grid; grid-template-columns: auto auto; justify-content: space-between; gap: 2px 12px; margin-top: 6px;
+  .wl-stats { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; margin-top: 6px;
               padding-top: 5px; border-top: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .wl-stats > span { color: var(--muted); white-space: nowrap; }
+  .wl-stats > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wl-stats > b { text-align: right; font-weight: 700; color: var(--text); white-space: nowrap; }
   .wl-stats > b.neg { color: var(--red); } .wl-stats > b.pos { color: var(--green); }
   .wl-stats small { font-weight: 400; color: var(--muted); font-size: 11px; }
@@ -268,6 +268,7 @@
   .tile { background: var(--section-bg); padding: 8px 10px; border-left: 3px solid var(--tone, var(--line)); }
   .tile .k { font-size: 12px; color: var(--muted); }
   .tile .v { font-size: 18px; font-weight: 700; }
+  .tile.wide { grid-column: span 2; min-width: 0; }   /* tiles with rows of text: two columns wide so nothing is cut */
   .steps { display: flex; gap: 2px; margin-top: 4px; }
   .steps i { flex: 1; height: 6px; background: var(--line); }
   .steps i.on { background: var(--amber); } .steps i.now { background: var(--red); }
@@ -1113,7 +1114,7 @@ function sizingLine(v) {
 function modeTile(v) {
   const small = t => `<small class="muted" style="font-size:12px;font-weight:400">${t}</small>`;
   if (v.entry_mode === "conditions") return `Conditions ${small(`<span class="condrow" title="${esc(condText(v))}">${esc(condShort(v))}</span>`)}`;
-  return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · ${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`)}`;
+  return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · <span style="white-space:nowrap">${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}</span>`)}`;
 }
 function render() {
   const s = status, page = $("#page");
@@ -1152,11 +1153,11 @@ function render() {
       <div class="tile" style="--tone:var(--green)"><div class="k">📊 Profit since Reset</div><div class="v num ${tone(s.pnl)}">${money(s.pnl, true)}</div></div>
       <div class="tile" style="--tone:#db2777"><div class="k">🎯 Until earn${s.settings.stop_profit_usd > 0 ? " " + money(s.settings.stop_profit_usd) : ""}</div><div class="v num">${!(s.settings.stop_profit_usd > 0) ? "off" : s.until_earn_left > 0 ? money(s.until_earn_left) + ' <small class="muted">to go</small>' : '<span class="pos">✅ reached</span>'}</div></div>
       <div class="tile" style="--tone:var(--amber)"><div class="k">🪜 ${stepLabel}${s.streak_lost ? " · lost " + money(s.streak_lost) : ""}${s.wins_left > 1 || (s.wins_left && s.settings.recover_wins > 1) ? ` · ${s.wins_left} win${s.wins_left > 1 ? "s" : ""} to clear` : ""}</div><div class="steps">${stepBar}</div></div>
-      <div class="tile"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}<div class="wl-stats" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped. Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset; a cycle a ladder end cut off doesn't count">
+      <div class="tile wide"><div class="k" title="Every bet in History; the small line counts since the last Reset">✅ Wins / ❌ Losses</div><div class="v num">${s.all_wins ?? s.wins} / ${s.all_losses ?? s.losses}</div>${s.all_wins != null && (s.all_wins !== s.wins || s.all_losses !== s.losses) ? `<div class="muted" style="font-size:11px">since Reset ${s.wins} / ${s.losses}</div>` : ""}<div class="wl-stats" title="Held: how long since the bot was first started after the last Reset. Ladder ends: how often since then a bet couldn't be paid, so the streak's loss was taken (When the ladder ends: reset) or the bot stopped. Longest ladder: the most bets in one recovery cycle (first loss until the win that clears the debt, History's *N) the bot came through since Reset; a cycle a ladder end cut off doesn't count">
         <span>⏱ Held</span><b>${s.held_since ? heldFor(s.held_since) : "–"}</b>
         <span>💥 Ladder ends</span><b class="${s.ladder_ends ? "neg" : "pos"}">${s.ladder_ends || 0}</b>
         <span>🪜 Longest ladder</span><b>${s.longest || 0} <small>bets</small>${s.cycle_bets ? ` <small class="now">now ${s.cycle_bets}</small>` : ""}</b></div></div>
-      <div class="tile" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div>${presetsOf(s.settings).length ? `<div class="muted" style="font-size:11px" title="This bot's settings are the same as this preset's (📚 Presets)">📄 Preset <b>${esc(presetsOf(s.settings).join(", "))}</b></div>` : ""}</div>
+      <div class="tile wide" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${modeTile(s.settings)}</div><div class="muted" style="font-size:11px">${sizingLine(s.settings)}</div>${presetsOf(s.settings).length ? `<div class="muted" style="font-size:11px" title="This bot's settings are the same as this preset's (📚 Presets)">📄 Preset <b>${esc(presetsOf(s.settings).join(", "))}</b></div>` : ""}</div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
