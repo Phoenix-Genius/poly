@@ -13,7 +13,8 @@ from typing import Any
 COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE"]
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "daily"]
 SIDE_MODES = ["alternate", "follow_last", "opposite_last", "cheaper", "leader", "up_only", "down_only",
-              "flip_on_loss", "flip_on_win", "random"]
+              "flip_on_loss", "flip_on_win", "random", "trend_random", "trend_follow"]
+TREND_WINDOWS = ["month", "30d", "7d", "3d", "1d", "12h", "6h"]
 COND_OPS = ["off", "and", "or"]
 
 # key: (default, type, options-or-None, label, help)
@@ -126,7 +127,13 @@ FIELDS: dict[str, tuple] = {
                   "(momentum). opposite_last = bet against it. cheaper = the side with the lower price. "
                   "leader = the dearer side (the one the market expects to win). "
                   "up_only / down_only = one side. flip_on_loss = keep the side after a win, switch after a "
-                  "loss. flip_on_win = the opposite. random = coin flip."),
+                  "loss. flip_on_win = the opposite. random = coin flip. trend_random = a coin weighted by how often "
+                  "each side won in the Trend window (47% Up = Up 47% of the time). trend_follow = always the side "
+                  "that won more often in the Trend window."),
+    "trend_window": ("month", "select", TREND_WINDOWS, "Trend window",
+                     "For trend_random and trend_follow: which past rounds to count. month = since the 1st of this "
+                     "month (JST), 30d / 7d / 3d / 1d / 12h / 6h = that long back. With fewer than 20 rounds "
+                     "counted, trend_random flips a fair coin and trend_follow bets the First side."),
     "first_side": ("up", "select", ["up", "down"], "First side",
                    "Side of the first bet (and the first after Reset) for alternate, flip_on_loss and "
                    "flip_on_win, and the fallback when the last result isn't known yet."),

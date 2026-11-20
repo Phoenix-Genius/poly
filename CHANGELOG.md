@@ -4,6 +4,42 @@ Every change, newest first. See AGENTS.md for the rules (what / why / how / test
 
 ## [Unreleased]
 
+## [1.4.29] - 2026-11-20
+
+### 📊 Trend side modes
+- **What:** two new Side modes. **trend_random** = a coin weighted by how often each side won lately (47% Up = bet Up
+  47% of the time); **trend_follow** = always the side that won more often. A new **Trend window** setting picks
+  which rounds count: month (since the 1st, JST), 30d, 7d, 3d, 1d, 12h or 6h. Under 20 rounds counted, trend_random
+  flips a fair coin and trend_follow bets the First side. The Bet mode tile shows the share the last bet used.
+- **How:** `poly_bot/trend.py` keeps every round's result for 32 days in `data/history/<COIN>-<tf>-results.json`,
+  topped up from Gamma in the background at most once a minute (only results, no prices; retries Gamma's 500s and
+  keeps what came in). `choose_side` takes `up_share`; the simulation works the share out from the past rounds before
+  each one (its 7 days of history are the most it can look back).
+
+### 🧪 Bulk test and 📊 Compare
+- **What:** **🧪 Bulk** (next to ＋ New) makes a group of paper bots in one go: a group name, base settings (a preset
+  or one of your bots), the paper balance each, one setting to vary with its values ("10, 20, 30", "10..40 step 10",
+  ranges "0.45-0.55" for the price / time windows, choices "1, 2") and an optional second one (every combination),
+  Start now. A preview lists the bots before Create. They are named "<group> <value>" ("Move 20", "Move 20
+  recover2"), so they fold into one group. Each group's header has a **📊** button: the group's bots side by side
+  since their Reset, the settings that differ first, then bets, win %, need % (price + fee), edge ± luck range,
+  profit, return, max bet, worst losing streak, ladder ends, longest ladder, held time; sortable, the best green.
+- **Why:** the owner: bulk paper bots in prefix-named groups, "some options are fixed and test varies values to
+  research about the options", then "build bulk test and compare first".
+- **How:** `POST /api/bulk` (`App.bulk_create`): every bot is checked (`BotConfig.validate`) before any is made, at
+  most 40, always paper, no keys, names unique; network / coin / round length / paper balance can't be varied.
+  Varying a condition's value turns that condition on (AND); the dialog warns when the base is in side mode, and
+  that random side adds luck between bots. `POST /api/compare` (`App.compare`) gives the numbers.
+- **Tests:** `test_bulk_test_makes_paper_bots_and_compare`.
+
+### Bet mode tile blurred until hovered
+- **What:** the 🧭 Bet mode tile's values (the right column: 180–240s left, ≥ $20.00, random, the preset…) are
+  blurred; hovering (or tapping, on a phone) shows them. "Side" / "Conditions" and the row labels stay clear.
+- **Why:** the owner: "bet mode card should be blur contents. and when hover, show the mode content plz.", then
+  "blur this part only" (the values).
+- **How:** index.html: `.blur-tile .wl-stats > b` is blurred; `.shown` (set on mouse enter, cleared on
+  leave, toggled by a tap) clears it and is kept across the page's 2 s redraws.
+
 ## [1.4.28] - 2026-11-20
 
 ### Balance, Account portfolio, Profit, Until earn and Step in one tile

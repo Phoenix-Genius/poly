@@ -488,7 +488,7 @@ class Controller:
             "until_earn_left": round(b.until_earn_left(), 2),
             "streak_lost": round(b.ladder.streak_lost, 2), "wins": b.ladder.wins, "losses": b.ladder.losses,
             "held_since": b.ladder.since or None, "ladder_ends": b.ladder.ends,
-            "longest": b.ladder.longest, "cycle_bets": b.ladder.cyc_bets,
+            "longest": b.ladder.longest, "cycle_bets": b.ladder.cyc_bets, "trend": b.trend_now,
             "all_wins": (aw := sum(1 for t in trades if t.get("side") == t.get("result"))),
             "all_losses": len(trades) - aw,                 # every bet in History, Resets or not
             "wins_left": (b.ladder.wins_left or self.cfg.recover_wins) if b.ladder.streak_lost > 0 else 0,
@@ -871,6 +871,104 @@ class App:
                  f", a copy of {self.prefix}{src.id}" if src else "")
         return {"id": bot_id, **self.list()}
 
+    BULK_MAX = 40                     # bots one 🧪 Bulk test may make
+
+    def bulk_create(self, body: dict) -> dict:
+        """🧪 Bulk test: many paper bots in one go, each the base settings (a preset or one of your bots) with its own
+        changes. body: {preset | copy_from, coin?, timeframe?, paper_balance_usd?, start?, bots: [{name, settings}]}.
+        Every bot is checked before any is made, so a bad value makes none; always paper, never Polymarket keys."""
+        plan = body.get("bots")
+        if not isinstance(plan, list) or not plan:
+            raise ValueError("No bots to make: pick a setting and its values")
+        if len(plan) > self.BULK_MAX:
+            raise ValueError(f"{len(plan)} bots is too many for one bulk test (up to {self.BULK_MAX})")
+        if self.max_bots and sum(not c.archived for c in self.controllers.values()) + len(plan) > self.max_bots:
+            raise ValueError(f"You can have up to {self.max_bots} bots. Archive or delete some to make {len(plan)} more.")
+        if body.get("copy_from"):
+            base = self.get(str(body["copy_from"])).cfg.settings()
+        elif body.get("preset"):
+            base = self.presets()["presets"].get(str(body["preset"]))
+            if base is None:
+                raise LookupError("no such preset")
+        else:
+            raise ValueError("Pick the base settings: a preset or one of your bots")
+        base = {k: v for k, v in base.items() if k in FIELDS}
+        coin = str(body.get("coin") or base.get("coin") or "BTC").upper()
+        tf = str(body.get("timeframe") or base.get("timeframe") or "5m")
+        if coin not in COINS or tf not in TIMEFRAMES:
+            raise ValueError("Pick a coin and a round length")
+        self.pm.series_id(coin, tf)
+        paper = body.get("paper_balance_usd") or base.get("paper_balance_usd") or 1000
+        fixed = {"coin": coin, "timeframe": tf, "network": "paper", "paper_balance_usd": paper}
+        values, names = [], set()
+        for i, b in enumerate(plan, 1):
+            name = str((b or {}).get("name") or "").strip()[:40]
+            if not name:
+                raise ValueError(f"Bot {i}: no name")
+            if name.lower() in names:
+                raise ValueError(f"Two bots are called {name!r}: give each value its own name")
+            names.add(name.lower())
+            over = (b or {}).get("settings") or {}
+            bad = [k for k in over if k not in FIELDS or k in fixed or k == "bot_name"]
+            if bad:
+                raise ValueError(f"{name}: {', '.join(bad)} can't be varied in a bulk test")
+            v = {**base, **over, **fixed, "bot_name": name}
+            try:
+                BotConfig(self.profiles, **v).validate()
+            except ValueError as e:
+                raise ValueError(f"{name}: {e}") from None
+            values.append(v)
+        made, errors = [], []
+        for v in values:
+            bot_id = free_bot_id(slug(v["bot_name"]), self.profiles, self.controllers)
+            folder = self.profiles / bot_id
+            folder.mkdir(parents=True)
+            write_json(folder / "config.json", BotConfig(folder, **v).settings())
+            self.controllers[bot_id] = Controller(bot_id, folder, self.pm, self.prefix + bot_id)
+            self.controllers[bot_id].name_for_blank = self.animal_name
+            made.append(bot_id)
+        log.info("Bulk test: %d paper bots (%s)", len(made), ", ".join(self.prefix + i for i in made))
+        if body.get("start"):
+            for bot_id in made:
+                try:
+                    self.controllers[bot_id].start()
+                except Exception as e:  # noqa: BLE001 - one that can't start leaves the others running
+                    errors.append(f"{self.controllers[bot_id].cfg.display_name}: {e}")
+        return {"ids": made, "errors": errors, **self.list()}
+
+    def compare(self, body: dict) -> dict:
+        """📊 Compare: each bot's results since its last Reset, side by side (a bulk test's group): bets, win rate,
+        what a bet needed to break even (its price + fee), edge = win rate - need, the luck range (2 standard errors),
+        profit, return on what was bet, biggest bet, longest losing streak, ladder ends, longest ladder, held time."""
+        from .charts import jst_unix
+        out = []
+        for bot_id in [str(i) for i in (body.get("ids") or [])][:60]:
+            ctl = self.get(bot_id)
+            lad, since = ctl.bot.ladder, ctl.bot.ladder.since
+            rows = [t for t in read_trades(ctl.cfg.trade_log) if t.get("result") in ("up", "down")
+                    and (not since or (jst_unix(t.get("placed") or t.get("time", "")) or 0) >= since - 1)]
+            n = len(rows)
+            wins = sum(1 for t in rows if t.get("side") == t.get("result"))
+            need = cost = pnl = big = 0.0
+            streak = worst = 0
+            for t in rows:
+                c, sh = float(t.get("cost") or 0), float(t.get("shares") or 0)
+                need += c / sh if sh else 0
+                cost += c
+                pnl += float(t.get("pnl") or 0)
+                big = max(big, c)
+                streak = 0 if t.get("side") == t.get("result") else streak + 1
+                worst = max(worst, streak)
+            w = wins / n if n else None
+            out.append({"id": bot_id, "name": ctl.cfg.display_name, "running": ctl.running, "network": ctl.cfg.network,
+                        "settings": ctl.cfg.settings(), "bets": n, "wins": wins, "win": w,
+                        "need": need / n if n else None, "edge": (w - need / n) if n else None,
+                        "luck": 2 * (w * (1 - w) / n) ** 0.5 if n else None,
+                        "pnl": round(pnl, 2), "roi": pnl / cost if cost else None, "max_bet": round(big, 2),
+                        "worst_streak": worst, "ladder_ends": lad.ends, "longest": lad.longest,
+                        "held_since": since or None, "balance": None if (b := ctl.balance()) is None else round(b, 2)})
+        return {"bots": out}
+
     def archive(self, bot_id: str) -> dict:
         """Put a stopped bot away for review: it keeps its settings, history and log, leaves the bot list (and the
         all-bots History) for the Archived group, and can't start until it's restored."""
@@ -1066,6 +1164,10 @@ def make_handler(app: Optional[App], public_hosts: tuple = ()):
                 return self._json(401, {"error": "Sign in first."})
             if self.path == "/api/bots":
                 return self._call(app.create, body)
+            if self.path == "/api/bulk":
+                return self._call(app.bulk_create, body)
+            if self.path == "/api/compare":
+                return self._call(app.compare, body)
             if self.path == "/api/order":
                 return self._call(app.set_order, body)
             if self.path == "/api/presets":

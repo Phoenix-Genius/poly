@@ -35,6 +35,7 @@ import statistics
 from types import SimpleNamespace
 from typing import Optional
 
+from .trend import prefix_ups, share, window_start
 from .strategy import (ROUND_SECONDS, buy_cap, choose_side, cost_of, entry_span, fee_per_share, leader_of, sides_allowed,
                        shares_for,
                        streak_sizing)
@@ -215,6 +216,10 @@ class RealFeed:
             if not any(self.fixed):
                 raise ValueError("No past round had an entry with these settings (the conditions were never all met "
                                  "within Price to): nothing to simulate.")
+        self.trend = getattr(cfg, "side_mode", "") in ("trend_random", "trend_follow")
+        if self.trend:                         # Up share before each round, from the past rounds themselves
+            self.starts = [r["start"] for r in rounds]
+            self.ups = prefix_ups([r["result"] for r in rounds])
         self._by_side: dict = shared.setdefault("by_side", {})
         self.skipped = 0
         self._jump()
@@ -237,7 +242,12 @@ class RealFeed:
             self.left_in_block -= 1
             if self.side_mode:                 # the side depends on the ladder or the last result
                 p = _price_at(r["h"], 0)
-                side = choose_side(self.cfg, lad, self.last_result, {"up": _ask(p), "down": _ask(1 - p)}, self.rng)
+                up_share = None
+                if self.trend:
+                    up_share = share(self.starts, self.ups, window_start(self.cfg.trend_window, r["start"]),
+                                     r["start"])[0]
+                side = choose_side(self.cfg, lad, self.last_result, {"up": _ask(p), "down": _ask(1 - p)}, self.rng,
+                                   up_share)
                 if (k, side) not in self._by_side:   # the entry depends only on the round and the side wanted
                     self._by_side[(k, side)] = entry_for(self.cfg, r, side)
                 raw = self._by_side[(k, side)]

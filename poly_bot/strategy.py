@@ -384,11 +384,12 @@ def other(side: str) -> str:
 
 
 def choose_side(cfg, ladder: Ladder, last_result: Optional[str], prices: dict,
-                rng: Optional[random.Random] = None) -> str:
+                rng: Optional[random.Random] = None, up_share: Optional[float] = None) -> str:
     """"up" or "down" for the next bet.
 
     last_result: how the market's last finished round ended ("up"/"down"), None if unknown.
     prices: best ask per side, {"up": 0.52, "down": 0.49}, used by the cheaper mode.
+    up_share: how often Up won over the trend window (0.47 = 47%), None if not known yet; for the trend modes.
     """
     mode, first = cfg.side_mode, cfg.first_side
     rng = rng or random
@@ -419,6 +420,12 @@ def choose_side(cfg, ladder: Ladder, last_result: Optional[str], prices: dict,
         return other(ladder.last_side) if flip else ladder.last_side
     if mode == "random":
         return rng.choice(["up", "down"])
+    if mode == "trend_random":          # a coin weighted by the window's Up share (50:50 until it's known)
+        return "up" if rng.random() < (0.5 if up_share is None else up_share) else "down"
+    if mode == "trend_follow":          # the side that won more often in the window
+        if up_share is None or up_share == 0.5:
+            return first
+        return "up" if up_share > 0.5 else "down"
     raise ValueError(f"unknown side mode {mode!r}")
 
 

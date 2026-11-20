@@ -29,6 +29,9 @@ from .markets import MarketError, Polymarket
 from .strategy import (Ladder, buy_cap, choose_side, conditions_text, cost_of, entry_span, leader_of, sides_allowed,
                        shares_for_book, streak_sizing, walk_asks)
 from .trades import append_trade, fix_trade
+from .trend import Results
+
+TREND_MODES = ("trend_random", "trend_follow")
 
 SETTLE_CHECK_SEC = 10          # how often to ask whether an ended round has resolved
 SLOW_RESULT_SEC = 15 * 60      # warn when a result takes longer than this
@@ -63,7 +66,23 @@ class Bot:
         self._next_settle_check = 0.0
         self._said = ""                # last waiting message logged (so it's logged once, not every tick)
         self._slow_warned = False
+        self.trend_now: Optional[dict] = None   # the last Trend share looked up: {"up": 0.47, "rounds": 5600}
         self.load()
+
+    def _trend_share(self) -> Optional[float]:
+        """How often Up won in the Trend window (0.47 = 47%), None while fewer than 20 rounds are known."""
+        results = getattr(self.pm, "trend_results", None)
+        if results is None:                    # one store per Polymarket, shared by every bot using it
+            results = self.pm.trend_results = Results(self.pm.series_id, clock=self.clock)
+        try:
+            up, n = results.up_share(self.cfg.coin, self.cfg.timeframe, self.cfg.trend_window)
+        except Exception as e:  # noqa: BLE001 - the side falls back to a fair coin / the First side
+            self.log.warning("Trend unknown: %s", e)
+            return None
+        self.trend_now = {"up": None if up is None else round(up, 4), "rounds": n}
+        if up is not None:
+            self.log.info("Trend %s: Up won %.1f%% of %d rounds", self.cfg.trend_window, up * 100, n)
+        return up
 
     # --- state -------------------------------------------------------------------------------------------
     @property
@@ -551,7 +570,8 @@ class Bot:
         if cfg.side_mode in ("follow_last", "opposite_last"):
             found = self.pm.last_result(cfg.coin, cfg.timeframe)
             last = found[1] if found else None
-        side = choose_side(cfg, self.ladder, last, prices, self.rng)
+        up_share = self._trend_share() if cfg.side_mode in TREND_MODES else None
+        side = choose_side(cfg, self.ladder, last, prices, self.rng, up_share)
         price = prices.get(side)
         if price is None or price > cfg.max_price + 1e-9:
             return self._wait(f"{side.upper()} costs {price if price is not None else 'n/a'}, above the max price "

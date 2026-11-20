@@ -108,6 +108,37 @@ class AppTest(unittest.TestCase):
         with self.assertRaises(LookupError):
             self.app.create({"preset": "time 90"})
 
+    def test_bulk_test_makes_paper_bots_and_compare(self):
+        from poly_bot.trades import append_trade
+        self.app.create({"coin": "BTC", "timeframe": "5m", "name": "Base"})
+        self.app.get("base").put_settings({"entry_mode": "conditions", "cond_time_sec": 90, "network": "live"})
+        plan = [{"name": f"Move {v}", "settings": {"cond_move": "and", "cond_move_usd": v}} for v in (10, 20)]
+        with self.assertRaises(ValueError):                                       # a bad value: none is made
+            self.app.bulk_create({"copy_from": "base", "bots": plan + [{"name": "Move x", "settings": {"multiplier": 0.5}}]})
+        with self.assertRaises(ValueError):                                       # live can't be set
+            self.app.bulk_create({"copy_from": "base", "bots": [{"name": "L", "settings": {"network": "live"}}]})
+        with self.assertRaises(ValueError):                                       # one name each
+            self.app.bulk_create({"copy_from": "base", "bots": [plan[0], plan[0]]})
+        self.assertEqual(sorted(self.app.controllers), ["base"])
+        d = self.app.bulk_create({"copy_from": "base", "paper_balance_usd": 500, "bots": plan})
+        self.assertEqual(d["ids"], ["move-10", "move-20"])
+        m = self.app.get("move-20").cfg
+        self.assertEqual((m.network, m.paper_balance_usd, m.cond_time_sec, m.cond_move_usd, m.bot_name),
+                         ("paper", 500, 90, 20, "Move 20"))                       # base + its change, always paper
+        self.assertFalse((self.app.get("move-20").folder / ".env").exists())
+        ctl = self.app.get("move-10")
+        for side, res, price in (("up", "up", 0.5), ("up", "down", 0.5), ("down", "down", 0.6), ("up", "down", 0.4)):
+            append_trade(ctl.cfg.trade_log, {"time": "2026-11-20 10:00:00", "placed": "2026-11-20 09:55:00",
+                                             "side": side, "result": res, "price": price, "shares": 10,
+                                             "cost": price * 10, "pnl": (10 - price * 10) if side == res else -price * 10})
+        c = {b["id"]: b for b in self.app.compare({"ids": ["move-10", "move-20"]})["bots"]}
+        self.assertEqual((c["move-10"]["bets"], c["move-10"]["wins"], c["move-10"]["worst_streak"]), (4, 2, 1))
+        self.assertAlmostEqual(c["move-10"]["need"], 0.5)
+        self.assertAlmostEqual(c["move-10"]["edge"], 0.0)
+        self.assertAlmostEqual(c["move-10"]["pnl"], 0.0)                         # +5 -5 +4 -4
+        self.assertEqual((c["move-20"]["bets"], c["move-20"]["edge"]), (0, None))
+        self.assertEqual(c["move-20"]["settings"]["cond_move_usd"], 20)
+
     def test_history_has_every_bet(self):
         from poly_bot.trades import append_trade
         self.app.create({"coin": "BTC", "timeframe": "5m"})

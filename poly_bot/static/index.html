@@ -271,6 +271,9 @@
   .tile.wide { flex: 1.25 1 240px; }
   /* the money tile: Budget balance and Account portfolio side by side, then Profit / Until earn rows, then the step */
   .tile.money-tile { flex: 2.2 1 320px; }
+  /* Bet mode tile: the settings' values (right column) blurred until hovered or tapped; mode and labels stay clear */
+  .blur-tile .wl-stats > b { filter: blur(5px); transition: filter .2s; user-select: none; }
+  .blur-tile:hover .wl-stats > b, .blur-tile.shown .wl-stats > b { filter: none; user-select: auto; }
   .mt-top { display: flex; justify-content: space-between; gap: 12px; }
   .mt-part { min-width: 0; } .mt-right { text-align: right; }
   .mt-part[data-chart] { cursor: pointer; border-radius: 3px; } .mt-part[data-chart]:hover { outline: 1px solid var(--accent); outline-offset: 2px; }
@@ -350,6 +353,24 @@
   dialog { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 16px; width: min(360px, 92vw); }
   dialog::backdrop { background: rgba(0,0,0,.35); }
   #allHistDlg { width: min(1500px, 96vw); max-height: 92vh; }
+  /* 🧪 Bulk test dialog and 📊 Compare */
+  #bulkDlg { width: min(720px, 96vw); max-height: 92vh; }
+  .bk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 600px) { .bk-grid { grid-template-columns: 1fr; } }
+  .bk-help { font-size: 12px; margin-top: 3px; }
+  .bk-grid .field { margin-bottom: 10px; }
+  .bk-start { align-self: end; padding-bottom: 6px; }
+  .bk-check { display: flex !important; flex-direction: row; align-items: center; gap: 6px; font-weight: 400; cursor: pointer; }
+  .bk-check input { width: auto !important; margin: 0; }
+  .bk-preview { max-height: 34vh; overflow-y: auto; margin: 8px 0; border: 1px solid var(--line); }
+  .bk-preview:empty { display: none; }
+  .bk-preview table, #cmpTable table { font-size: 12px; }
+  #cmpDlg { width: min(1300px, 96vw); max-height: 92vh; }
+  #cmpTable th { cursor: pointer; user-select: none; } #cmpTable th.sorted { color: var(--text); }
+  #cmpTable td.best { background: color-mix(in srgb, var(--green) 18%, transparent); font-weight: 700; }
+  #cmpTable td.var { color: var(--accent); font-weight: 650; }
+  .g-cmp { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 12px; }
+  .g-cmp:hover { color: var(--accent); }
   #allHistDlg .ah-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
   #allHistDlg .ah-bets { max-height: 52vh; }
   #allHistDlg tr.ah-pick { cursor: pointer; }
@@ -420,6 +441,7 @@
       <div id="whoBox" hidden><span class="who" id="who" data-no-i18n></span><span class="spacer"></span>
         <button class="btn" id="usersBtn" hidden>👥 Users</button><button class="btn" id="addEmail" hidden title="Reach your bots from any browser">✉️ Keep my bots with email</button><button class="btn" id="signOut" hidden>Sign out</button></div>
       <div class="side-tools"><button class="btn" id="allHistBtn" title="Every bot's results and bets in one table">📋 History</button><button class="btn" id="roundsBtn" title="Polymarket's past rounds: results, prices and moves, for research">🔎 Rounds</button>
+        <button class="btn" id="bulkBtn" title="Bulk test: many paper bots in one group, the same settings but one (or two) changed, to research an option">🧪 Bulk</button>
         <button class="btn primary" id="newBot" title="Create a paper or live bot">＋ New</button></div>
       <div class="side-head"><h2>Bots</h2><span id="sideCount" class="muted"></span><div class="side-totals" id="sideTotals"></div>
         <button class="btn" id="groupBtn" title="Group bots whose names start with the same word (Stallion…, TT…)">▤ Group</button></div>
@@ -478,6 +500,27 @@
 </div></div>
 <dialog id="usersDlg"><h3 style="margin-top:0">Users</h3><div class="scroll" id="usersTable"></div>
   <form method="dialog" style="margin-top:10px"><button class="btn">Close</button></form></dialog>
+<dialog id="bulkDlg"><form method="dialog" id="bulkForm">
+  <h3 style="margin-top:0">🧪 Bulk test <small class="muted" style="font-weight:400">paper bots that differ in one setting</small></h3>
+  <div class="bk-grid">
+    <div class="field"><label>Group name</label><input name="group" maxlength="24" placeholder="e.g. Move" required>
+      <div class="muted bk-help">The bots are called "Move 10", "Move 20"…, so they fold into one group in the list.</div></div>
+    <div class="field"><label>Base settings</label><select name="base"></select>
+      <div class="muted bk-help">Everything not varied comes from here. Always paper, no keys.</div></div>
+    <div class="field"><label>Paper balance each ($)</label><input name="paper" type="number" min="1" step="any" value="1000"></div>
+    <div class="field bk-start"><label class="bk-check"><input type="checkbox" name="start" checked> Start them now</label></div>
+    <div class="field"><label>Vary</label><select name="key1"></select></div>
+    <div class="field"><label>Values</label><input name="vals1" placeholder="10, 20, 30  or  10..40 step 10"></div>
+    <div class="field"><label>And vary (optional)</label><select name="key2"></select></div>
+    <div class="field"><label>Values</label><input name="vals2" placeholder="1, 2, 3"></div>
+  </div>
+  <div class="muted bk-help" id="bkHint"></div>
+  <div class="bk-preview scroll" id="bkPreview"></div>
+  <div class="actions"><button class="btn primary" value="ok" id="bkCreate">Create</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+</form></dialog>
+<dialog id="cmpDlg"><div class="ah-head"><h3 style="margin:0" id="cmpTitle">📊 Compare</h3><span class="spacer"></span>
+  <button class="btn" id="cmpReload" type="button">↻</button><form method="dialog" style="margin:0"><button class="btn">Close</button></form></div>
+  <div class="scroll" id="cmpTable"></div><p class="muted" id="cmpNote" style="font-size:12px;margin:10px 0 0"></p></dialog>
 <dialog id="allHistDlg"><div class="ah-head"><h3 style="margin:0">History · all bots</h3><span class="spacer"></span>
   <select id="ahBot"></select><select id="ahNet"><option value="">paper + live</option><option value="live">live</option><option value="paper">paper</option></select>
   <button class="btn" id="ahCsv" type="button">⬇ CSV</button><form method="dialog" style="margin:0"><button class="btn">Close</button></form></div>
@@ -682,7 +725,7 @@ function groupBox(g, card) {
   const run = g.filter(b => b.running).length, pnl = g.reduce((a, b) => a + (b.pnl || 0), 0);
   const open = groupOpen[g.key] ?? true;
   return `<details class="bot-group" data-g="${esc(g.key)}" draggable="true" title="Drag the box to move the whole group" ${open || g.some(b => b.id === current) ? "open" : ""}>
-    <summary title="Bots whose names start with “${esc(g.word)}”"><span class="g-name" data-no-i18n>${esc(g.word)}</span><span class="muted">${g.length}</span>
+    <summary title="Bots whose names start with “${esc(g.word)}”"><span class="g-name" data-no-i18n>${esc(g.word)}</span><span class="muted">${g.length}</span><button class="g-cmp" type="button" data-cmp="${esc(g.key)}" title="📊 Compare this group's bots side by side">📊</button>
       <span class="g-sum">${run ? `<span class="dot run"></span> ${run} · ` : ""}<b class="${tone(pnl)}" title="The group's profit since Reset, added up">${money(pnl, true)}</b></span></summary>
     <div class="g-items">${g.map(card).join("")}</div></details>`;
 }
@@ -719,6 +762,11 @@ function renderBots() {
   };
   $("#groupBtn").setAttribute("aria-pressed", String(groupOn));
   $("#bots").innerHTML = botBlocks().map(g => g.key ? groupBox(g, card) : card(g[0])).join("");
+  for (const el of document.querySelectorAll(".g-cmp")) el.onclick = e => {
+    e.preventDefault(); e.stopPropagation();
+    const box = el.closest(".bot-group");
+    compareDlg(box.querySelector(".g-name").textContent, [...box.querySelectorAll(".bot-item")].map(x => x.dataset.id));
+  };
   for (const el of document.querySelectorAll(".bot-group")) el.ontoggle = () => {
     groupOpen[el.dataset.g] = el.open; try { localStorage.setItem("groupOpen", JSON.stringify(groupOpen)); } catch (e) {}
   };
@@ -862,13 +910,174 @@ $("#newDlg").addEventListener("close", async () => {
   } catch (e) { toast(e.message); }
 });
 
+// --- 🧪 Bulk test: paper bots with the base settings and one (or two) settings changed, named "<group> <value>" ---
+const BULK_SKIP = ["bot_name", "network", "coin", "timeframe", "paper_balance_usd", "poll_interval_sec"];
+const BULK_RANGES = {                       // two settings varied together, written "0.45-0.55"
+  "range:price": {label: "Price range (side mode: Min–Max price)", keys: ["min_price", "max_price"]},
+  "range:cond_price": {label: "Price range (conditions: Price from–to)", keys: ["cond_price_min", "cond_price_max"]},
+  "range:cond_time": {label: "Time left window (conditions: ≥–≤ s left)", keys: ["cond_time_min_sec", "cond_time_sec"]},
+};
+const COND_OF = {cond_move_usd: "cond_move", cond_time_sec: "cond_time", cond_time_min_sec: "cond_time",
+                 cond_price_min: "cond_price", cond_price_max: "cond_price"};   // a varied value turns its condition on
+let bulkBase = {};
+const fieldOf = k => schema.fields.find(f => f.key === k);
+function bulkKeys() {
+  const opts = schema.fields.filter(f => !BULK_SKIP.includes(f.key)).map(f => `<option value="${f.key}">${esc(f.label)}</option>`);
+  return Object.entries(BULK_RANGES).map(([k, r]) => `<option value="${k}">${esc(r.label)}</option>`).join("") + opts.join("");
+}
+// "10, 20, 30" or "10..40 step 10" (numbers), "0.45-0.55, 0.40-0.60" (ranges), "1, 2" / "and, or" (choices)
+function bulkValues(key, text) {
+  text = String(text || "").trim();
+  if (!key || !text) return [];
+  const range = BULK_RANGES[key], f = range ? null : fieldOf(key);
+  const m = text.match(/^(-?[\d.]+)\s*\.\.\s*(-?[\d.]+)(?:\s*step\s*([\d.]+))?$/i);
+  if (m && !range) {
+    const [a, b, st] = [+m[1], +m[2], +(m[3] || 1)], out = [];
+    if (!(st > 0)) throw new Error("step must be more than 0");
+    for (let x = a, i = 0; x <= b + 1e-9 && i < 100; x += st, i++) out.push(+x.toFixed(6));
+    return out.map(v => ({label: String(v), set: {[key]: v}}));
+  }
+  return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
+    if (range) {
+      const r = t.match(/^(-?[\d.]*)\s*[-–~]\s*(-?[\d.]+)$/);
+      if (!r) throw new Error(`"${t}": write a range like 0.45-0.55`);
+      return {label: t.replace(/\s+/g, ""), set: {[range.keys[0]]: r[1] === "" ? 0 : +r[1], [range.keys[1]]: +r[2]}};
+    }
+    if (f.type === "select") {
+      if (!(f.options || []).includes(t)) throw new Error(`"${t}" isn't a choice of ${f.label}: ${(f.options || []).join(", ")}`);
+      return {label: t, set: {[key]: t}};
+    }
+    if (f.type === "bool" || f.type === "checkbox") return {label: t, set: {[key]: /^(1|true|yes|on)$/i.test(t)}};
+    if (f.type === "int" || f.type === "number" || f.type === "float") {
+      if (!isFinite(+t)) throw new Error(`"${t}" isn't a number (${f.label})`);
+      return {label: t, set: {[key]: +t}};
+    }
+    return {label: t, set: {[key]: t}};
+  });
+}
+function bulkPlan() {                       // [{name, settings}] from the form, plus the columns for the preview
+  const f = $("#bulkForm"), group = f.group.value.trim();
+  const a = bulkValues(f.key1.value, f.vals1.value), b = f.key2.value ? bulkValues(f.key2.value, f.vals2.value) : [];
+  if (f.key2.value && f.key2.value === f.key1.value) throw new Error("Pick two different settings");
+  const combos = b.length ? a.flatMap(x => b.map(y => [x, y])) : a.map(x => [x]);
+  return combos.map(parts => {
+    const set = Object.assign({}, ...parts.map(p => p.set));
+    for (const k of Object.keys(set)) {     // a condition's value only counts with the condition on
+      const op = COND_OF[k];
+      if (op && (!(set[op] || bulkBase[op]) || (set[op] || bulkBase[op]) === "off")) set[op] = "and";
+    }
+    // one setting: "Move 20"; two: the second gets a short tag, "Move 20 recover2"
+    const tag = parts.length > 1 ? (BULK_RANGES[f.key2.value]?.label || fieldOf(f.key2.value)?.label || "").split(/[\s(:]/)[0].toLowerCase().slice(0, 8) : "";
+    const label = parts.length > 1 ? `${parts[0].label} ${tag}${parts[1].label}` : parts[0].label;
+    return {name: `${group} ${label}`.trim().slice(0, 40), settings: set, labels: parts.map(p => p.label)};
+  });
+}
+function bulkPreview() {
+  const f = $("#bulkForm"), box = $("#bkPreview"), hint = $("#bkHint");
+  let plan = [];
+  try { plan = bulkPlan(); hint.className = "muted bk-help"; }
+  catch (e) { hint.className = "neg bk-help"; hint.textContent = e.message; box.innerHTML = ""; $("#bkCreate").disabled = true; return; }
+  const n = plan.length;
+  hint.textContent = !f.group.value.trim() ? "Give the group a name." : !n ? "Pick a setting to vary and type its values."
+    : `${n} paper bot${n > 1 ? "s" : ""}${n > 40 ? " — too many: 40 at most" : ""}. Each value needs many bets (300+) before the results mean much.` +
+      (plan.some(p => Object.keys(p.settings).some(k => COND_OF[k])) && (plan[0].settings.entry_mode || bulkBase.entry_mode) !== "conditions"
+        ? " ⚠️ The base is in side mode: condition values do nothing there. Pick a conditions base (or vary Bet mode too)." : "") +
+      (["random", "trend_random"].includes(bulkBase.side_mode) && !plan.some(p => "side_mode" in p.settings)
+        ? " Tip: random side flips a coin per bot, so luck differs between them; Move or leader compares fairer." : "");
+  $("#bkCreate").disabled = !n || n > 40 || !f.group.value.trim();
+  const keys = [...new Set(plan.flatMap(p => Object.keys(p.settings)))];
+  const lab = k => esc(fieldOf(k)?.label || k);
+  box.innerHTML = n ? `<table><tr><th class="l">Bot</th>${keys.map(k => `<th>${lab(k)}</th>`).join("")}</tr>${plan.slice(0, 60).map(p =>
+    `<tr><td class="l" data-no-i18n>${esc(p.name)}</td>${keys.map(k => `<td>${esc(String(p.settings[k] ?? bulkBase[k] ?? ""))}</td>`).join("")}</tr>`).join("")}</table>` : "";
+}
+async function bulkDlg() {
+  await loadPresets();
+  const f = $("#bulkForm");
+  f.base.innerHTML = `<optgroup label="A preset">${Object.keys(presets).map(n => `<option value="preset:${esc(n)}">📄 ${esc(n)}</option>`).join("")}</optgroup>` +
+    (bots.length ? `<optgroup label="One of your bots (its settings)">${bots.map(b => `<option value="${esc(b.id)}">${esc(b.name)} · ${esc(b.coin)} ${esc(b.timeframe)}</option>`).join("")}</optgroup>` : "");
+  if (current && bots.some(b => b.id === current)) f.base.value = current;
+  f.key1.innerHTML = '<option value="">— pick a setting —</option>' + bulkKeys();
+  f.key2.innerHTML = '<option value="">— nothing —</option>' + bulkKeys();
+  f.base.onchange = async () => {
+    const v = f.base.value;
+    try { bulkBase = v.startsWith("preset:") ? {...presets[v.slice(7)]} : (await api(`/api/bots/${v}/status`)).settings || {}; }
+    catch (e) { bulkBase = {}; }
+    bulkPreview();
+  };
+  for (const el of [f.group, f.vals1, f.vals2]) el.oninput = bulkPreview;
+  for (const el of [f.key1, f.key2]) el.onchange = () => {
+    const k = el.value, inp = el === f.key1 ? f.vals1 : f.vals2, fld = k && !BULK_RANGES[k] ? fieldOf(k) : null;
+    inp.placeholder = BULK_RANGES[k] ? "0.45-0.55, 0.40-0.60" : fld?.type === "select" ? (fld.options || []).join(", ") : "10, 20, 30  or  10..40 step 10";
+    bulkPreview();
+  };
+  await f.base.onchange();
+  $("#bulkDlg").showModal();
+}
+$("#bulkBtn").onclick = () => bulkDlg();
+$("#bulkDlg").addEventListener("close", async () => {
+  if ($("#bulkDlg").returnValue !== "ok") return;
+  const f = $("#bulkForm"), v = f.base.value;
+  try {
+    const plan = bulkPlan().map(({name, settings}) => ({name, settings}));
+    const d = await api("/api/bulk", {preset: v.startsWith("preset:") ? v.slice(7) : "", copy_from: v.startsWith("preset:") ? "" : v,
+      paper_balance_usd: +f.paper.value || 1000, start: f.start.checked, bots: plan});
+    bots = d.bots; archived = d.archived || archived; renderBots();
+    toast(`Made ${d.ids.length} paper bots in the "${f.group.value.trim()}" group${f.start.checked ? " and started them" : ""}` +
+      (d.errors.length ? `. Couldn't start: ${d.errors.join("; ")}` : ""));
+  } catch (e) { toast(e.message); }
+});
+
+// --- 📊 Compare: a group's bots side by side; the settings that differ between them come first ---
+let cmp = {title: "", ids: [], rows: [], sort: "edge", desc: true};
+const CMP_COLS = [
+  {k: "bets", t: "Bets", f: r => r.bets},
+  {k: "win", t: "Win %", f: r => r.win == null ? "–" : (r.win * 100).toFixed(1)},
+  {k: "need", t: "Need %", f: r => r.need == null ? "–" : (r.need * 100).toFixed(1), tip: "What a bet needed to break even: its price + fee"},
+  {k: "edge", t: "Edge", f: r => r.edge == null ? "–" : `<span class="${tone(r.edge)}">${r.edge >= 0 ? "+" : ""}${(r.edge * 100).toFixed(1)}%</span> <small class="muted">±${(r.luck * 100).toFixed(1)}</small>`, tip: "Win % - Need %. ± is the luck range: an edge inside it may be luck"},
+  {k: "pnl", t: "Profit", f: r => `<span class="${tone(r.pnl)}">${money(r.pnl, true)}</span>`},
+  {k: "roi", t: "Return", f: r => r.roi == null ? "–" : `<span class="${tone(r.roi)}">${(r.roi * 100).toFixed(1)}%</span>`, tip: "Profit ÷ everything bet"},
+  {k: "max_bet", t: "Max bet", f: r => money(r.max_bet)},
+  {k: "worst_streak", t: "Worst L-streak", f: r => r.worst_streak},
+  {k: "ladder_ends", t: "💥 Ends", f: r => `<span class="${r.ladder_ends ? "neg" : ""}">${r.ladder_ends}</span>`},
+  {k: "longest", t: "🪜 Longest", f: r => r.longest},
+  {k: "held_since", t: "⏱ Held", f: r => heldFor(r.held_since) || "–"},
+];
+async function compareDlg(title, ids) {
+  cmp = {...cmp, title, ids};
+  $("#cmpTitle").textContent = `📊 Compare · ${title}`;
+  $("#cmpTable").innerHTML = '<p class="muted">Loading…</p>';
+  if (!$("#cmpDlg").open) $("#cmpDlg").showModal();
+  try { cmp.rows = (await api("/api/compare", {ids})).bots; } catch (e) { $("#cmpTable").innerHTML = `<p class="neg">${esc(e.message)}</p>`; return; }
+  renderCompare();
+}
+$("#cmpReload").onclick = () => compareDlg(cmp.title, cmp.ids);
+function renderCompare() {
+  const rows = cmp.rows, skip = ["bot_name", "paper_balance_usd"];
+  const vary = Object.keys(rows[0]?.settings || {}).filter(k => !skip.includes(k) && new Set(rows.map(r => JSON.stringify(r.settings[k]))).size > 1);
+  const key = cmp.sort, val = r => key.startsWith("set:") ? r.settings[key.slice(4)] : key === "name" ? r.name : key === "held_since" ? -(r.held_since || 0) : r[key];
+  const sorted = [...rows].sort((a, b) => { const x = val(a), y = val(b);
+    if (x == null) return 1; if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * (cmp.desc ? -1 : 1); });
+  const best = {};                          // the best of each column (most edge, profit, return; fewest ladder ends)
+  for (const k of ["edge", "pnl", "roi"]) best[k] = Math.max(...rows.filter(r => r[k] != null && r.bets).map(r => r[k]));
+  const th = (k, t, tip = "") => `<th class="${k === "name" ? "l" : ""} ${cmp.sort === k ? "sorted" : ""}" data-sort="${k}"${tip ? ` title="${esc(tip)}"` : ""}>${t}${cmp.sort === k ? (cmp.desc ? " ▾" : " ▴") : ""}</th>`;
+  $("#cmpTable").innerHTML = rows.length ? `<table><tr>${th("name", "Bot")}${vary.map(k => th("set:" + k, esc(fieldOf(k)?.label || k))).join("")}${CMP_COLS.map(c => th(c.k, c.t, c.tip)).join("")}</tr>
+    ${sorted.map(r => `<tr><td class="l" data-no-i18n><span class="dot ${r.running ? "run" : ""}"></span> ${esc(r.name)}</td>${vary.map(k => `<td class="var">${esc(String(r.settings[k]))}</td>`).join("")}
+      ${CMP_COLS.map(c => `<td class="${best[c.k] != null && r.bets && r[c.k] === best[c.k] && rows.length > 1 ? "best" : ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</table>` : '<p class="muted">No bots.</p>';
+  for (const el of $("#cmpTable").querySelectorAll("th[data-sort]")) el.onclick = () => {
+    cmp.desc = cmp.sort === el.dataset.sort ? !cmp.desc : true; cmp.sort = el.dataset.sort; renderCompare(); };
+  const n = Math.min(...rows.map(r => r.bets));
+  $("#cmpNote").innerHTML = `Since each bot's last Reset. <b>Edge</b> = Win % − Need % (the price + fee a bet paid). An edge inside its <b>±</b> luck range may be luck: with ${n} bets the range is still wide; wait for 300+ bets each. Click a column to sort. Green = the best in that column.`;
+}
+
 // --- settings form, built from the schema, in groups like the hyperliquid bot ---
 const SIZING_ONLY = {base_profit_usd: "recover", recover_wins: "recover", start_usd: "multiply", multiplier: "multiply", bet_pct: "percent"};
 const ZERO_IS_OFF = ["budget_usd", "stop_profit_usd", "max_steps", "entry_window_sec", "target_steps", "cond_price_min", "cond_price_max", "cond_time_min_sec"];   // shown empty when 0
-const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper"];
+const SIDE_FIRST = ["alternate", "follow_last", "opposite_last", "flip_on_loss", "flip_on_win", "cheaper", "trend_follow"];
+const TREND_MODES = ["trend_random", "trend_follow"];
 const GROUPS = [
   {title: "Market & money", icon: "💼", tone: "money", keys: ["bot_name", "network", "paper_balance_usd", "coin", "timeframe", "budget_usd", "stop_profit_usd"]},
-  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "side_mode", "first_side",
+  {title: "Mode & side", icon: "🧭", tone: "dir", keys: ["entry_mode", "side_mode", "trend_window", "first_side",
     "cond_time", "cond_time_sec", "cond_time_min_sec", "cond_move", "cond_move_usd", "cond_price", "cond_price_min", "cond_price_max", "cond_join"]},   // conditions: one row per condition
   {title: "Bet size", icon: "🎯", tone: "target", keys: ["sizing", "bet_pct", "base_profit_usd", "start_usd", "target_steps", "recover_wins", "multiplier"]},
   {title: "Loss recovery", icon: "🔁", tone: "recover", keys: ["max_steps", "on_ladder_end"]},
@@ -977,6 +1186,7 @@ function showFields() {
   // Time left / Move / Price rows
   const m = v.entry_mode, side = m === "side", conds = m === "conditions";
   $('.field[data-key="first_side"]')?.classList.toggle("hide", !side || !SIDE_FIRST.includes(v.side_mode));
+  $('.field[data-key="trend_window"]')?.classList.toggle("hide", !side || !TREND_MODES.includes(v.side_mode));
   $('.field[data-key="side_mode"]')?.classList.toggle("hide", !side);   // conditions: they pick, else the leader
   for (const k of ["min_price", "max_price", "price_spread"]) $(`.field[data-key="${k}"]`)?.classList.toggle("hide", !side);
   // conditions: each condition's AND/OR box, and its values only while it's on
@@ -1013,7 +1223,8 @@ function renderSettingsHead(v) {
     ? chip("🎯", "Profit/win", auto ? "auto" : money(n(v.base_profit_usd)), auto ? "target_steps" : "base_profit_usd")
     : chip("🎯", "Start", auto ? "auto" : money(n(v.start_usd)), auto ? "target_steps" : "start_usd");
   const sideMode = {alternate: "alternate", follow_last: "follow last", opposite_last: "against last", cheaper: "cheaper side",
-    leader: "leader", up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random"}[v.side_mode] || v.side_mode;
+    leader: "leader", up_only: "📈 up only", down_only: "📉 down only", flip_on_loss: "switch on loss", flip_on_win: "switch on win", random: "random",
+    trend_random: `random by trend (${v.trend_window})`, trend_follow: `follow trend (${v.trend_window})`}[v.side_mode] || v.side_mode;
   const conds = v.entry_mode === "conditions";
   const win = conds ? (v.cond_time === "and" ? (n(v.cond_time_min_sec) > 0 ? `${n(v.cond_time_min_sec)}–${n(v.cond_time_sec)} s left` : `≤ ${n(v.cond_time_sec)} s left`) : "whole round") : n(v.entry_window_sec) > 0 ? `first ${n(v.entry_window_sec)} s` : "auto";
   $("#summary").innerHTML = `<div class="chips pairs">` + [
@@ -1026,7 +1237,7 @@ function renderSettingsHead(v) {
     chip("🛑", "Ladder end", (n(v.max_steps) > 0 ? `${n(v.max_steps)} losses · ` : "") + (v.on_ladder_end === "stop" ? "stop" : "restart"), "on_ladder_end"),
     conds ? chip("🧩", "Conditions", esc(condText(v)) + (v.cond_price === "off" ? " · no limit" : ""), "cond_time")
       : chip("💲", "Price", `${n(v.min_price) > 0 ? n(v.min_price).toFixed(2) : "0"}–${n(v.max_price).toFixed(2)}`, "max_price"),
-    conds ? chip("🔁", "Side", "by the conditions, else the leader", "cond_move") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" ? ` · ${v.first_side} first` : ""), "side_mode"),
+    conds ? chip("🔁", "Side", "by the conditions, else the leader", "cond_move") : chip("🔁", "Side", esc(sideMode) + (SIDE_FIRST.includes(v.side_mode) && v.side_mode !== "follow_last" && v.side_mode !== "opposite_last" && v.side_mode !== "cheaper" && v.side_mode !== "trend_follow" ? ` · ${v.first_side} first` : ""), "side_mode"),
     chip("⏱️", "Entry", win, "entry_window_sec"),
     chip(v.result_wait === "official" ? "⌛" : "⚡", "Result", v.result_wait === "official" ? "official (~3 min)" : "fast (~30 s)", "result_wait"),
   ].join("") + `</div>`;
@@ -1112,7 +1323,7 @@ function condShort(v) {
 // the Bet mode tile: which mode and its main setting, e.g. "Conditions ≤90s left AND 0.75–0.95", "Side · random"
 // the Bet mode tile's last line: how bets are sized, e.g. "recover over 2 wins · $2/win", "multiply ×2.2 from $3"
 // the bot page's Bet mode tile: one setting per row, label left, value right (like the Wins / Losses tile's rows)
-function modeRows(v) {
+function modeRows(v, trend) {
   const rows = [], row = (k, val, title = "") => rows.push(`<span${title ? ` title="${esc(title)}"` : ""}>${k}</span><b>${val}</b>`);
   const side = esc(String(v.side_mode).replace(/_/g, " "));
   if (v.entry_mode === "conditions") {
@@ -1126,6 +1337,10 @@ function modeRows(v) {
     row("🎲 Side", side);
   } else {
     row("🎲 Side", side);
+    if (TREND_MODES.includes(v.side_mode)) row("📊 Trend", trend?.up != null
+      ? `${(trend.up * 100).toFixed(1)}% <small>Up · ${trend.rounds} rounds · ${esc(v.trend_window)}</small>`
+      : `<small>${esc(v.trend_window)} · ${trend ? `only ${trend.rounds} rounds yet` : "at the next bet"}</small>`,
+      "How often Up won in the Trend window, as of the last bet");
     row("💲 Price", `${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}`);
   }
   const n = +v.recover_wins || 1;
@@ -1140,6 +1355,7 @@ function modeTile(v) {
   if (v.entry_mode === "conditions") return `Conditions ${small(`<span class="condrow" title="${esc(condText(v))}">${esc(condShort(v))}</span>`)}`;
   return `Side ${small(esc(String(v.side_mode).replace(/_/g, " ")) + ` · <span style="white-space:nowrap">${(+v.min_price).toFixed(2)}–${(+v.max_price).toFixed(2)}</span>`)}`;
 }
+let modeShown = false;                      // the Bet mode tile unblurred (pointer on it, or tapped)
 function render() {
   const s = status, page = $("#page");
   if (!s) { page.innerHTML = current ? '<div class="empty">Loading…</div>' : '<div class="empty">Make your first bot with <b>＋ New bot</b>.</div>'; return; }
@@ -1177,7 +1393,7 @@ function render() {
         <span>⏱ Held</span><b>${s.held_since ? heldFor(s.held_since) : "–"}</b>
         <span>💥 Ladder ends</span><b class="${s.ladder_ends ? "neg" : "pos"}">${s.ladder_ends || 0}</b>
         <span>🪜 Longest ladder</span><b>${s.longest || 0} <small>bets</small>${s.cycle_bets ? ` <small class="now">now ${s.cycle_bets}</small>` : ""}</b></div></div>
-      <div class="tile wide" style="--tone:var(--accent)"><div class="k">🧭 Bet mode</div><div class="v">${s.settings.entry_mode === "conditions" ? "Conditions" : "Side"}</div>${modeRows(s.settings)}</div>
+      <div class="tile wide blur-tile ${modeShown ? "shown" : ""}" id="modeTile" style="--tone:var(--accent)" title="Hover (or tap) to show the bet mode"><div class="k">🧭 Bet mode</div><div class="v">${s.settings.entry_mode === "conditions" ? "Conditions" : "Side"}</div>${modeRows(s.settings, s.trend)}</div>
     </div>
     ${s.network === "live" ? keysPanel(s) : ""}
     ${betPanel(s)}
@@ -1195,6 +1411,12 @@ function render() {
     localStorage.setItem("folded", JSON.stringify([...folded])); h.parentElement.classList.toggle("folded");
   };
   wireSim();
+  const mt = $("#modeTile");                // shown while the pointer is on it (kept across the 2 s redraws); a tap toggles
+  if (mt) {
+    mt.onmouseenter = () => { modeShown = true; mt.classList.add("shown"); };
+    mt.onmouseleave = () => { modeShown = false; mt.classList.remove("shown"); };
+    mt.onclick = e => { if (e.pointerType === "mouse") return; modeShown = !modeShown; mt.classList.toggle("shown", modeShown); };
+  }
   $("#saveKeys")?.addEventListener("click", saveKeys);
   $("#checkKeys")?.addEventListener("click", () => doAct("check"));
   const log = $("#log"); if (log) log.scrollTop = logAtEnd ? log.scrollHeight : keepScroll;
